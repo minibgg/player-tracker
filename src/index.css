@@ -1,0 +1,258 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------
+   Design tokens. Colours are space-separated "R G B" triples so that
+   Tailwind opacity modifiers work (bg-accent/10). Dark is the default
+   theme; the light theme is an opt-in via [data-theme="light"].
+   ------------------------------------------------------------------ */
+:root {
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Source Serif 4", "Lora", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  /* Sharp, instrument-panel corners */
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+
+  --ease: cubic-bezier(0, 0, 0.2, 1);
+  --dur: 200ms;
+
+  /* Dark theme (default) */
+  --c-canvas: 10 10 10; /* #0A0A0A page background */
+  --c-surface: 20 20 19; /* #141413 cards, panels, modals */
+  --c-surface-2: 26 26 24; /* #1A1A18 hover / raised */
+  --c-surface-3: 36 36 33; /* pressed / selected */
+  --c-line: 38 37 31; /* #26251F borders */
+  --c-line-strong: 62 61 52;
+  --c-ink: 237 235 228; /* #EDEBE4 primary text */
+  --c-ink-2: 138 136 127; /* #8A887F secondary text */
+  --c-accent: 224 82 58; /* #E0523A */
+  --c-accent-hover: 240 101 75; /* #F0654B */
+  --c-accent-ink: 240 101 75; /* accent used as text (AA on dark) */
+  --c-accent-fg: 255 255 255; /* text on accent fills */
+  --c-success: 140 196 154;
+  --c-warn: 224 179 90;
+  --c-danger: 238 138 128;
+  --c-info: 143 179 204;
+  --c-team-blue: 130 165 215;
+  --c-scrim: 0 0 0;
+
+  --glow: 0 0 40px rgb(224 82 58 / 0.15);
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.3);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --c-canvas: 237 232 217; /* #EDE8D9 warm cream page */
+  --c-surface: 245 241 228; /* #F5F1E4 panels, slightly lighter than page */
+  --c-surface-2: 232 226 208; /* hover / raised */
+  --c-surface-3: 221 214 192; /* pressed / selected */
+  --c-line: 214 206 183;
+  --c-line-strong: 190 181 152;
+  --c-ink: 20 20 19;
+  --c-ink-2: 94 90 76; /* AA on cream */
+  --c-accent-hover: 200 62 40;
+  --c-accent-ink: 178 50 30;
+  --c-success: 63 125 78;
+  --c-warn: 154 98 18;
+  --c-danger: 179 58 58;
+  --c-info: 77 111 134;
+  --c-team-blue: 66 104 160;
+  --c-scrim: 20 20 19;
+
+  --glow: 0 0 40px rgb(224 82 58 / 0.12);
+  --shadow-soft: 0 1px 2px rgb(20 20 19 / 0.04), 0 4px 16px rgb(20 20 19 / 0.05);
+  color-scheme: light;
+}
+
+@layer base {
+  body {
+    background-color: rgb(var(--c-canvas));
+    color: rgb(var(--c-ink));
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+  }
+
+  ::selection {
+    background-color: rgb(var(--c-accent) / 0.3);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent));
+    outline-offset: 2px;
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgb(var(--c-accent) / 0.3);
+    border-color: rgb(var(--c-accent));
+  }
+}
+
+/* Small mono caption used for labels, meta and section names */
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--c-ink-2));
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Thin, quiet scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-line-strong)) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--c-line-strong));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--c-ink-2));
+}
+
+/* Cards: border highlight + small lift on hover */
+.card {
+  background-color: rgb(var(--c-surface));
+  border: 1px solid rgb(var(--c-line));
+  transition:
+    border-color var(--dur) var(--ease),
+    background-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+
+.card:hover {
+  background-color: rgb(var(--c-surface-2));
+  border-color: rgb(var(--c-accent) / 0.6);
+  transform: translateY(-3px);
+}
+
+.card-active {
+  border-color: rgb(var(--c-success) / 0.6);
+}
+
+/* Soft accent glow for important elements */
+.glow {
+  box-shadow: var(--glow);
+}
+
+/* Primary button */
+.btn-primary {
+  background-color: rgb(var(--c-accent));
+  color: rgb(var(--c-accent-fg));
+  font-weight: 600;
+  transition:
+    background-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+
+.btn-primary:hover {
+  background-color: rgb(var(--c-accent-hover));
+  box-shadow: 0 0 24px rgb(var(--c-accent) / 0.4);
+}
+
+.btn-primary:active {
+  transform: translateY(1px);
+}
+
+/* Secondary (outline) button */
+.btn-ghost {
+  border: 1px solid rgb(var(--c-line-strong));
+  color: rgb(var(--c-ink));
+  transition:
+    border-color var(--dur) var(--ease),
+    background-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+
+.btn-ghost:hover {
+  border-color: rgb(var(--c-accent));
+  background-color: rgb(var(--c-accent) / 0.08);
+  box-shadow: 0 0 20px rgb(var(--c-accent) / 0.15);
+}
+
+/* Scroll reveal: fade + rise, staggered via --reveal-delay */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 500ms var(--ease),
+    transform 500ms var(--ease);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Blinking terminal cursor */
+.cursor-blink {
+  animation: cursor-blink 1.1s steps(1) infinite;
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+
+  .card:hover {
+    transform: none;
+  }
+}
