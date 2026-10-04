@@ -48,6 +48,8 @@ import {
 } from "./services/notifications";
 import { ShieldAlert } from "lucide-react";
 
+const MAX_TOASTS = 4;
+
 export default function App() {
   // Config & State
   const [apiKey, setApiKey] = useState(getStoredApiKey);
@@ -87,8 +89,23 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
 
   const addToast = useCallback((type, message, title = "", duration = 4500) => {
-    const id = Date.now() + Math.random().toString();
-    setToasts((prev) => [...prev, { id, type, message, title, duration }]);
+    setToasts((prev) => {
+      // Collapse identical toasts into one with a counter
+      const dup = prev.find(
+        (t) => t.type === type && t.message === message && t.title === title,
+      );
+      if (dup) {
+        return prev.map((t) =>
+          t === dup ? { ...t, count: (t.count || 1) + 1, duration } : t,
+        );
+      }
+      const id = Date.now() + Math.random().toString();
+      // Cap how many toasts are on screen; oldest ones are dropped
+      return [
+        ...prev,
+        { id, type, message, title, duration, count: 1 },
+      ].slice(-MAX_TOASTS);
+    });
   }, []);
 
   const removeToast = useCallback((id) => {

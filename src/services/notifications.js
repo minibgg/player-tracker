@@ -261,10 +261,13 @@ export const requestNotificationPermission = async () => {
   }
 };
 
+const DESKTOP_NOTIFICATION_AUTOCLOSE_MS = 6000;
+
 export const sendDesktopNotification = (
   title,
   options = {},
   triggerSound = false,
+  autoCloseMs = DESKTOP_NOTIFICATION_AUTOCLOSE_MS,
 ) => {
   if (triggerSound) {
     playMatchAlertSound();
@@ -283,6 +286,10 @@ export const sendDesktopNotification = (
       silent: false,
       ...options,
     });
+
+    // Auto-dismiss the desktop popup so it doesn't linger
+    const closeTimer = setTimeout(() => notif.close(), autoCloseMs);
+    notif.onclose = () => clearTimeout(closeTimer);
 
     notif.onclick = () => {
       window.focus();
