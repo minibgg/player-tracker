@@ -4,7 +4,7 @@ import React, { useEffect, useRef } from "react";
  * Fades and lifts its children into view once they scroll on screen.
  * `delay` (ms) staggers siblings. Falls back to visible without IntersectionObserver.
  */
-export const Reveal = ({ children, delay = 0, className = "" }) => {
+export const Reveal = ({ children, delay = 0, className = "", ...rest }) => {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -29,6 +29,7 @@ export const Reveal = ({ children, delay = 0, className = "" }) => {
 
   return (
     <div
+      {...rest}
       ref={ref}
       className={`reveal ${className}`}
       style={{ "--reveal-delay": `${delay}ms` }}

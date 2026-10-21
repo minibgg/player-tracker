@@ -14,7 +14,6 @@ export const AddPlayerBar = ({
   onAddPlayer,
   isAdding,
   hasApiKey,
-  isDemoMode,
   openSettings,
 }) => {
   const [riotIdInput, setRiotIdInput] = useState("");
@@ -33,8 +32,8 @@ export const AddPlayerBar = ({
       return;
     }
 
-    if (!hasApiKey && !isDemoMode) {
-      setInputError("Сначала укажите Riot API Key в настройках.");
+    if (!hasApiKey) {
+      setInputError("Сначала укажите API-ключ Riot в настройках.");
       return;
     }
 
@@ -82,6 +81,7 @@ export const AddPlayerBar = ({
               setRiotIdInput(e.target.value);
               if (inputError) setInputError("");
             }}
+            id="riot-id-input"
             aria-label="Riot ID"
             aria-invalid={Boolean(inputError)}
             placeholder={`Имя#ТЕГ  (по умолчанию #${currentRegion.defaultTag})`}
@@ -111,7 +111,7 @@ export const AddPlayerBar = ({
       {inputError && (
         <div role="alert" className="mt-2 font-mono text-xs text-danger">
           {inputError}{" "}
-          {!hasApiKey && !isDemoMode && (
+          {!hasApiKey && (
             <button
               type="button"
               onClick={openSettings}

@@ -1,4 +1,8 @@
 // Storage & Caching service for Riot players, keys, and tracking preferences
+import { DEFAULT_ALERT_RULES } from "./alertRules";
+import { DEFAULT_WEBHOOKS } from "./webhooks";
+import { normalizeMotionPref } from "./motion";
+import { normalizeHeroScene } from "../components/hero/scenes";
 
 const STORAGE_KEYS = {
   API_KEY: 'lol_tracker_api_key',
@@ -10,8 +14,57 @@ const STORAGE_KEYS = {
   NOTIFICATIONS_ENABLED: 'lol_tracker_notifications_enabled',
   WATCHLIST: 'lol_tracker_watchlist',
   PLAYER_CACHE: 'lol_tracker_player_cache',
-  DEMO_MODE: 'lol_tracker_demo_mode',
+  ALERT_RULES: 'lol_tracker_alert_rules',
+  WEBHOOKS: 'lol_tracker_webhooks',
+  // Also read by the inline script in index.html before first paint
+  MOTION: 'lol_tracker_motion',
+  HERO_SCENE: 'lol_tracker_hero_scene',
+  ACTIVE_GAME: 'lol_tracker_active_game',
+  APEX_API_KEY: 'lol_tracker_apex_api_key',
+  APEX_WATCHLIST: 'lol_tracker_apex_watchlist',
+  APEX_LEGEND_ASSETS: 'lol_tracker_apex_legend_assets',
 };
+
+const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+
+// Reads a JSON object and fills in fields missing from older saves
+const getStoredObject = (key, defaults) => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key));
+    if (!isPlainObject(parsed)) return defaults;
+    const merged = { ...defaults };
+    for (const field of Object.keys(defaults)) {
+      const value = parsed[field];
+      if (value === undefined) continue;
+      merged[field] = isPlainObject(defaults[field]) && isPlainObject(value)
+        ? { ...defaults[field], ...value }
+        : value;
+    }
+    return merged;
+  } catch {
+    return defaults;
+  }
+};
+
+const setStoredObject = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.error(`Failed to save ${key} to localStorage:`, e);
+  }
+};
+
+export const getStoredAlertRules = () =>
+  getStoredObject(STORAGE_KEYS.ALERT_RULES, DEFAULT_ALERT_RULES);
+
+export const setStoredAlertRules = (rules) =>
+  setStoredObject(STORAGE_KEYS.ALERT_RULES, rules);
+
+export const getStoredWebhooks = () =>
+  getStoredObject(STORAGE_KEYS.WEBHOOKS, DEFAULT_WEBHOOKS);
+
+export const setStoredWebhooks = (webhooks) =>
+  setStoredObject(STORAGE_KEYS.WEBHOOKS, webhooks);
 
 export const getStoredApiKey = () => {
   return localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
@@ -93,6 +146,61 @@ export const setStoredWatchlist = (watchlist) => {
   }
 };
 
+// Apex Legends tab: its own key and list, sharing every other setting
+export const getStoredApexApiKey = () => {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.APEX_API_KEY) || '';
+  } catch {
+    return '';
+  }
+};
+
+export const setStoredApexApiKey = (key) => {
+  localStorage.setItem(STORAGE_KEYS.APEX_API_KEY, key.trim());
+};
+
+export const getStoredApexWatchlist = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEYS.APEX_WATCHLIST));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error('Failed to parse Apex watchlist from localStorage:', e);
+    return [];
+  }
+};
+
+export const setStoredApexWatchlist = (watchlist) =>
+  setStoredObject(STORAGE_KEYS.APEX_WATCHLIST, watchlist);
+
+// Legend icons and banners seen in API responses, by legend key
+export const getStoredLegendAssets = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEYS.APEX_LEGEND_ASSETS));
+    return isPlainObject(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+export const setStoredLegendAssets = (assets) =>
+  setStoredObject(STORAGE_KEYS.APEX_LEGEND_ASSETS, assets);
+
+export const getStoredActiveGame = () => {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.ACTIVE_GAME) === 'apex' ? 'apex' : 'lol';
+  } catch {
+    return 'lol';
+  }
+};
+
+export const setStoredActiveGame = (game) => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_GAME, game);
+  } catch (e) {
+    console.error('Failed to save active game:', e);
+  }
+};
+
 const getCacheKey = (region, gameName, tagLine) => {
   return `${(region || '').toLowerCase()}::${(gameName || '').toLowerCase()}#${(tagLine || '').toLowerCase()}`;
 };
@@ -137,10 +245,34 @@ export const clearPlayerCache = () => {
   localStorage.removeItem(STORAGE_KEYS.PLAYER_CACHE);
 };
 
-export const getStoredDemoMode = () => {
-  return localStorage.getItem(STORAGE_KEYS.DEMO_MODE) === 'true';
+export const getStoredMotionPref = () => {
+  try {
+    return normalizeMotionPref(localStorage.getItem(STORAGE_KEYS.MOTION));
+  } catch {
+    return 'auto';
+  }
 };
 
-export const setStoredDemoMode = (enabled) => {
-  localStorage.setItem(STORAGE_KEYS.DEMO_MODE, String(enabled));
+export const setStoredMotionPref = (pref) => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.MOTION, pref);
+  } catch (e) {
+    console.error('Failed to save motion level:', e);
+  }
+};
+
+export const getStoredHeroScene = () => {
+  try {
+    return normalizeHeroScene(localStorage.getItem(STORAGE_KEYS.HERO_SCENE));
+  } catch {
+    return normalizeHeroScene(null);
+  }
+};
+
+export const setStoredHeroScene = (scene) => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.HERO_SCENE, scene);
+  } catch (e) {
+    console.error('Failed to save hero background:', e);
+  }
 };

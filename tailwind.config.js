@@ -35,6 +35,12 @@ export default {
         danger: token("danger"),
         info: token("info"),
         "team-blue": token("team-blue"),
+        heat: {
+          1: token("heat-1"),
+          2: token("heat-2"),
+          3: token("heat-3"),
+          4: token("heat-4"),
+        },
         scrim: token("scrim"),
       },
       fontFamily: {

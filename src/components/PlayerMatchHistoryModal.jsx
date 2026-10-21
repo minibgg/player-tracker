@@ -1,18 +1,5 @@
 import React, { useState, useEffect } from "react";
-import {
-  X,
-  RotateCw,
-  Swords,
-  Trophy,
-  Skull,
-  Clock,
-  Calendar,
-  Coins,
-  Flame,
-  ExternalLink,
-  ChevronRight,
-  ShieldAlert,
-} from "lucide-react";
+import { X, RotateCw, Trophy, AlertTriangle } from "lucide-react";
 import { fetchMatchHistory, getItemIconUrl } from "../services/matchHistory";
 import {
   getChampionByKey,
@@ -23,8 +10,20 @@ import { getSpellIconUrl } from "../data/spells";
 import { getQueueInfo } from "../data/queues";
 import { getRegionById } from "../data/regions";
 
-export const PlayerMatchHistoryModal = ({
-  isOpen,
+// Hooks live in the inner component; keying it by player resets the state
+// when the user jumps to another player from a roster
+export const PlayerMatchHistoryModal = (props) => {
+  const { isOpen, player } = props;
+  if (!isOpen || !player) return null;
+  return (
+    <PlayerMatchHistoryContent
+      key={`${player.region}:${player.gameName}#${player.tagLine}`}
+      {...props}
+    />
+  );
+};
+
+const PlayerMatchHistoryContent = ({
   onClose,
   player,
   apiKey,
@@ -32,19 +31,11 @@ export const PlayerMatchHistoryModal = ({
   customProxy,
   onSelectOtherPlayer,
 }) => {
-  const [matches, setMatches] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isCached, setIsCached] = useState(false);
-  const [isMock, setIsMock] = useState(false);
-  const [loadError, setLoadError] = useState("");
+  // null while the first request is in flight
+  const [history, setHistory] = useState(null);
 
   useEffect(() => {
-    if (!isOpen || !player) return;
-
     let isMounted = true;
-    setIsLoading(true);
-    setLoadError("");
-
     fetchMatchHistory({
       puuid: player.puuid,
       gameName: player.gameName,
@@ -56,24 +47,33 @@ export const PlayerMatchHistoryModal = ({
       count: 10,
     })
       .then((res) => {
-        if (isMounted) {
-          setMatches(res.matches || []);
-          setIsCached(Boolean(res.isCached));
-          setIsMock(Boolean(res.isMock));
-          setLoadError(res.error || "");
-          setIsLoading(false);
-        }
+        if (isMounted) setHistory(res);
       })
       .catch(() => {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setHistory({ matches: [], error: "Не удалось загрузить историю." });
+        }
       });
 
     return () => {
       isMounted = false;
     };
-  }, [isOpen, player, apiKey, proxyType, customProxy]);
+  }, [player, apiKey, proxyType, customProxy]);
 
-  if (!isOpen || !player) return null;
+  // Escape closes the modal
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const isLoading = history === null;
+  const matches = history?.matches || [];
+  const isCached = Boolean(history?.isCached);
+  const isMock = Boolean(history?.isMock);
+  const loadError = history?.error || "";
 
   const region = getRegionById(player.region);
 
@@ -111,136 +111,125 @@ export const PlayerMatchHistoryModal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-scrim/85 backdrop-blur-md animate-in fade-in duration-200">
+    <div
+      className="fx-fade fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-scrim/80"
+      onClick={onClose}
+    >
       <div
-        className="w-full max-w-4xl max-h-[92vh] flex flex-col rounded-2xl bg-surface border border-line shadow-2xl overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-title"
+        className="fx-modal w-full max-w-4xl max-h-[92vh] flex flex-col bg-surface border border-line-strong"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="relative p-5 sm:p-6 bg-surface border-b border-line flex items-center justify-between">
-          <div className="flex items-center gap-3 sm:gap-4">
-            <div className="relative">
+        <header className="px-5 sm:px-6 py-5 border-b border-line flex items-start justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="relative shrink-0">
               <img
                 src={getProfileIconUrl(player.profileIconId)}
-                alt={player.gameName}
-                className="w-14 h-14 rounded-xl border-2 border-accent object-cover bg-surface-3"
+                alt=""
+                className="size-14 rounded-sm border border-line-strong object-cover bg-surface-3"
                 onError={(e) => {
                   e.target.src =
                     "https://ddragon.leagueoflegends.com/cdn/14.24.1/img/profileicon/29.png";
                 }}
               />
               {player.summonerLevel && (
-                <span className="absolute -bottom-1 -right-1 px-1.5 py-0.2 bg-surface border border-line-strong rounded text-[10px] font-bold text-accent-ink">
+                <span className="absolute bottom-0 right-0 px-1 bg-canvas border-t border-l border-line-strong font-mono text-[10px] leading-4 text-ink">
                   {player.summonerLevel}
                 </span>
               )}
             </div>
-
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="font-display text-lg sm:text-xl font-medium text-ink">
-                  {player.gameName}
-                </h2>
-                <span className="text-sm font-semibold text-ink-2">
-                  #{player.tagLine}
-                </span>
-                <span className="text-xs px-2 py-0.5 rounded bg-surface border border-line text-ink">
-                  {region.flag} {region.short}
-                </span>
-              </div>
-              <p className="text-xs text-ink-2 mt-0.5">
-                История последних матчей (Riot Match-V5)
-              </p>
+            <div className="min-w-0">
+              <div className="label">История матчей · {region.short}</div>
+              <h2
+                id="history-title"
+                className="font-display text-xl sm:text-2xl text-ink mt-1 truncate"
+              >
+                {player.gameName}
+                {player.tagLine && (
+                  <span className="font-mono text-sm text-ink-2 ml-2">
+                    #{player.tagLine}
+                  </span>
+                )}
+              </h2>
             </div>
           </div>
 
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-lg bg-surface-2 hover:bg-surface-3 text-ink-2 hover:text-ink border border-line transition-colors"
+            aria-label="Закрыть"
+            className="p-2 -mr-2 text-ink-2 hover:text-ink transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
-        </div>
+        </header>
 
-        {/* Summary Statistics Bar */}
         {matches.length > 0 && (
-          <div className="p-4 bg-canvas border-b border-line flex flex-wrap items-center justify-between gap-4 text-xs">
-            <div className="flex items-center gap-4 sm:gap-6">
-              {/* Winrate */}
+          <div className="px-5 sm:px-6 py-4 border-b border-line flex flex-wrap items-end justify-between gap-4">
+            <div className="flex flex-wrap gap-x-8 gap-y-2">
               <div>
-                <div className="text-[11px] text-ink-2">
-                  Винрейт ({totalGames} игр)
-                </div>
-                <div className="flex items-baseline gap-1.5 mt-0.5">
+                <div className="label">Винрейт · {totalGames} игр</div>
+                <div className="font-mono text-sm mt-0.5 tabular-nums">
                   <span
-                    className={`text-base font-bold ${winRate >= 50 ? "text-info" : "text-danger"}`}
+                    className={winRate >= 50 ? "text-success" : "text-danger"}
                   >
                     {winRate}%
                   </span>
-                  <span className="text-ink-2 text-[11px]">
-                    ({wins}В {losses}П)
+                  <span className="text-ink-2">
+                    {" "}
+                    · {wins}W {losses}L
                   </span>
                 </div>
               </div>
-
-              {/* KDA */}
-              <div className="border-l border-line pl-4 sm:pl-6">
-                <div className="text-[11px] text-ink-2">Средний KDA</div>
-                <div className="flex items-baseline gap-2 mt-0.5">
-                  <span className="font-bold text-ink">
-                    {avgKills} /{" "}
-                    <span className="text-danger">{avgDeaths}</span> /{" "}
-                    {avgAssists}
-                  </span>
-                  <span className="text-warn font-semibold font-mono text-[11px]">
-                    {avgKda}:1
-                  </span>
+              <div>
+                <div className="label">Средний K/D/A</div>
+                <div className="font-mono text-sm mt-0.5 tabular-nums text-ink">
+                  {avgKills} / <span className="text-danger">{avgDeaths}</span>{" "}
+                  / {avgAssists}
+                  <span className="text-ink-2"> · KDA {formatKda(avgKda)}</span>
                 </div>
               </div>
             </div>
 
-            {/* Cache badge */}
-            <div className="flex items-center gap-2">
-              {isCached && (
-                <span className="text-[10px] px-2 py-0.5 rounded bg-surface border border-info/40 text-info">
-                  ⚡ Из кэша (быстро)
+            <div className="flex flex-wrap items-center gap-3">
+              {isCached && <span className="label">из кэша</span>}
+              {isMock && (
+                <span
+                  className="label text-warn"
+                  title="API ключ не указан — показаны примерные матчи"
+                >
+                  демо-данные
                 </span>
               )}
               {loadError && (
-                <span
-                  className="text-[10px] px-2 py-0.5 rounded bg-danger/10 border border-danger/40 text-danger"
-                  title={loadError}
-                >
-                  ⚠️ {loadError}
-                </span>
-              )}
-              {isMock && (
-                <span
-                  className="text-[10px] px-2 py-0.5 rounded bg-warn/10 border border-warn/40 text-warn"
-                  title="API ключ не указан — показаны реалистичные матчи"
-                >
-                  ⚠️ Демо-история матчей
+                <span className="label text-danger" title={loadError}>
+                  ошибка загрузки
                 </span>
               )}
             </div>
           </div>
         )}
 
-        {/* Matches Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-3 flex-1">
+        <div className="px-5 sm:px-6 py-2 overflow-y-auto flex-1">
           {isLoading ? (
             <div className="py-16 text-center text-ink-2 space-y-3">
-              <RotateCw className="w-8 h-8 animate-spin mx-auto text-accent-ink" />
-              <div className="text-sm font-semibold">
-                Загрузка истории матчей...
-              </div>
+              <RotateCw className="w-6 h-6 animate-spin mx-auto text-accent-ink" />
+              <div className="font-mono text-xs">загрузка истории…</div>
             </div>
           ) : matches.length === 0 ? (
-            <div className="py-16 text-center text-ink-2 space-y-2">
-              <Trophy className="w-8 h-8 mx-auto text-ink-2" />
-              <div className="text-sm font-semibold">Матчи не найдены</div>
-              <p className="text-xs text-ink-2">
-                У данного игрока нет недавних игр в выбранном регионе.
+            <div className="py-16 text-center space-y-2">
+              {loadError ? (
+                <AlertTriangle className="w-6 h-6 mx-auto text-danger" />
+              ) : (
+                <Trophy className="w-6 h-6 mx-auto text-ink-2" />
+              )}
+              <div className="font-display text-xl text-ink">
+                {loadError ? "Историю не удалось загрузить" : "Матчей пока нет"}
+              </div>
+              <p className="text-sm text-ink-2 max-w-sm mx-auto">
+                {loadError || "У игрока нет недавних игр в этом регионе."}
               </p>
             </div>
           ) : (
@@ -256,22 +245,42 @@ export const PlayerMatchHistoryModal = ({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-4 bg-canvas border-t border-line flex items-center justify-between text-xs text-ink-2">
-          <span>
-            Нажмите на любого игрока в матче, чтобы открыть его историю
+        <footer className="px-5 sm:px-6 py-4 bg-canvas border-t border-line flex items-center justify-end sm:justify-between gap-4">
+          <span className="hidden sm:inline font-mono text-[11px] text-ink-2">
+            клик по игроку в составе открывает его историю
           </span>
           <button
+            type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-surface-2 hover:bg-surface-3 text-ink-2 hover:text-ink border border-line transition-colors"
+            className="btn-ghost h-9 px-4 font-mono text-xs shrink-0"
           >
-            Закрыть
+            закрыть
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );
 };
+
+// A game without deaths has no finite KDA
+const formatKda = (kda) => (kda === "Perfect" ? "∞" : kda);
+
+const RosterName = ({ entry, highlight, onSelect }) => (
+  <button
+    type="button"
+    onClick={() => onSelect && onSelect(entry)}
+    className={`flex w-full items-center gap-1.5 text-left truncate transition-colors hover:text-accent-ink ${
+      highlight ? "text-accent-ink" : "text-ink-2"
+    }`}
+  >
+    <img
+      src={getChampionIconUrl(entry.championId)}
+      alt=""
+      className="size-3.5 rounded-sm object-cover bg-surface-3 shrink-0"
+    />
+    <span className="truncate">{entry.riotId || "Player"}</span>
+  </button>
+);
 
 const MatchHistoryRow = ({
   match,
@@ -287,150 +296,117 @@ const MatchHistoryRow = ({
   const isWin = match.win;
 
   return (
-    <div
-      className={`rounded-xl border p-3 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 transition-all ${
-        isWin
-          ? "bg-team-blue/10 border-team-blue/40 hover:border-team-blue"
-          : "bg-danger/10 border-danger/40 hover:border-danger"
+    <article
+      className={`relative flex flex-col md:flex-row md:items-center gap-3 md:gap-5 py-4 pl-4 border-b border-line ${
+        isWin ? "bg-success/[0.04]" : "bg-danger/[0.04]"
       }`}
     >
-      {/* 1. Status & Queue Info */}
-      <div className="flex md:flex-col items-center md:items-start justify-between md:justify-center min-w-[100px] border-b md:border-b-0 md:border-r border-line pb-2 md:pb-0 md:pr-3">
-        <div className="flex items-center gap-1.5">
-          <span
-            className={`font-bold text-xs uppercase tracking-wider ${isWin ? "text-team-blue" : "text-danger"}`}
-          >
-            {isWin ? "Победа" : "Поражение"}
-          </span>
+      <span
+        aria-hidden="true"
+        className={`absolute left-0 top-0 bottom-0 w-0.5 ${isWin ? "bg-success" : "bg-danger"}`}
+      />
+
+      {/* Result and queue */}
+      <div className="md:w-32 shrink-0">
+        <div className={`label ${isWin ? "text-success" : "text-danger"}`}>
+          {isWin ? "Победа" : "Поражение"}
         </div>
-        <div className={`text-[11px] font-medium mt-0.5 ${queue.color}`}>
-          {queue.name}
-        </div>
-        <div className="text-[10px] text-ink-2 flex items-center gap-1 mt-0.5">
-          <span>{formatRelativeTime(match.gameCreation)}</span>
-          <span>•</span>
-          <span>{formatDuration(match.gameDuration)}</span>
+        <div className={`text-xs mt-0.5 ${queue.color}`}>{queue.name}</div>
+        <div className="font-mono text-[11px] text-ink-2 mt-0.5">
+          {formatRelativeTime(match.gameCreation)} ·{" "}
+          {formatDuration(match.gameDuration)}
         </div>
       </div>
 
-      {/* 2. Champion, Spells & Level */}
-      <div className="flex items-center gap-3">
-        {/* Champion Avatar */}
+      {/* Champion, spells, K/D/A */}
+      <div className="flex items-center gap-3 shrink-0">
         <div className="relative">
           <img
             src={getChampionIconUrl(match.championId)}
             alt={champ.name}
-            className={`w-12 h-12 rounded-lg border-2 object-cover bg-surface-3 ${
-              isWin ? "border-team-blue" : "border-danger"
-            }`}
+            className="size-12 rounded-sm border border-line-strong object-cover bg-surface-3"
           />
           {match.champLevel && (
-            <span className="absolute -bottom-1 -right-1 px-1 py-0.2 bg-surface border border-line-strong rounded text-[9px] font-bold text-ink">
+            <span className="absolute bottom-0 right-0 px-1 bg-canvas border-t border-l border-line-strong font-mono text-[9px] leading-[14px] text-ink">
               {match.champLevel}
             </span>
           )}
         </div>
-
-        {/* Spells */}
         <div className="flex flex-col gap-1">
           {spell1 && (
             <img
               src={spell1}
-              alt="Spell"
-              className="w-5 h-5 rounded border border-line"
+              alt=""
+              className="size-5 rounded-sm border border-line"
             />
           )}
           {spell2 && (
             <img
               src={spell2}
-              alt="Spell"
-              className="w-5 h-5 rounded border border-line"
+              alt=""
+              className="size-5 rounded-sm border border-line"
             />
           )}
         </div>
-
-        {/* KDA & CS */}
-        <div className="min-w-[110px]">
-          <div className="font-bold text-sm text-ink">
-            {match.kills} /{" "}
-            <span className="text-danger">{match.deaths}</span> /{" "}
-            {match.assists}
+        <div className="min-w-[7rem] font-mono">
+          <div className="text-sm text-ink tabular-nums">
+            {match.kills} / <span className="text-danger">{match.deaths}</span>{" "}
+            / {match.assists}
           </div>
+          <div className="text-[11px] text-ink-2">KDA {formatKda(match.kda)}</div>
           <div className="text-[11px] text-ink-2">
-            <span className="text-warn font-semibold">{match.kda}:1</span>{" "}
-            KDA
-          </div>
-          <div className="text-[10px] text-ink-2">
-            {match.cs} CS ({match.csPerMin}/мин)
+            {match.cs} CS · {match.csPerMin}/мин
           </div>
         </div>
       </div>
 
-      {/* 3. Items Grid */}
-      <div className="flex items-center gap-1 flex-wrap">
+      {/* Items */}
+      <div className="flex items-center gap-1 flex-wrap md:flex-nowrap shrink-0">
         {match.items?.map((itemId, i) => {
           const itemUrl = getItemIconUrl(itemId);
           return (
             <div
               key={i}
-              className={`w-7 h-7 rounded border flex items-center justify-center bg-surface-3 ${
-                i === 6 ? "rounded-full border-warn/40" : "border-line"
+              className={`size-7 border bg-surface-3 overflow-hidden ${
+                i === 6
+                  ? "rounded-full border-line-strong"
+                  : "rounded-sm border-line"
               }`}
             >
-              {itemUrl ? (
+              {itemUrl && (
                 <img
                   src={itemUrl}
-                  alt="Item"
-                  className="w-full h-full object-cover rounded"
+                  alt=""
+                  className="w-full h-full object-cover"
                 />
-              ) : (
-                <span className="w-1.5 h-1.5 rounded-full bg-surface-3" />
               )}
             </div>
           );
         })}
       </div>
 
-      {/* 4. Mini Teams Rosters (Allies vs Enemies) */}
-      <div className="grid grid-cols-2 gap-2 text-[10px] border-t md:border-t-0 md:border-l border-line pt-2 md:pt-0 md:pl-3 min-w-[200px]">
-        {/* Allies */}
-        <div className="space-y-0.5">
-          {match.allies?.slice(0, 5).map((ally, aIdx) => (
-            <div
-              key={aIdx}
-              onClick={() => onSelectOtherPlayer && onSelectOtherPlayer(ally)}
-              className={`flex items-center gap-1 cursor-pointer hover:text-ink transition-colors truncate ${
-                ally.isTarget ? "text-accent-ink font-bold" : "text-ink-2"
-              }`}
-            >
-              <img
-                src={getChampionIconUrl(ally.championId)}
-                alt=""
-                className="w-3.5 h-3.5 rounded-sm object-cover bg-surface-3 shrink-0"
-              />
-              <span className="truncate">{ally.riotId || "Player"}</span>
-            </div>
+      {/* Mini rosters */}
+      <div className="grid grid-cols-2 gap-x-3 text-[11px] md:ml-auto md:w-48 min-w-0 pr-2">
+        <div className="space-y-0.5 min-w-0">
+          {match.allies?.slice(0, 5).map((ally, i) => (
+            <RosterName
+              key={i}
+              entry={ally}
+              highlight={ally.isTarget}
+              onSelect={onSelectOtherPlayer}
+            />
           ))}
         </div>
-
-        {/* Enemies */}
-        <div className="space-y-0.5">
-          {match.enemies?.slice(0, 5).map((enemy, eIdx) => (
-            <div
-              key={eIdx}
-              onClick={() => onSelectOtherPlayer && onSelectOtherPlayer(enemy)}
-              className="flex items-center gap-1 text-ink-2 hover:text-ink transition-colors cursor-pointer truncate"
-            >
-              <img
-                src={getChampionIconUrl(enemy.championId)}
-                alt=""
-                className="w-3.5 h-3.5 rounded-sm object-cover bg-surface-3 shrink-0"
-              />
-              <span className="truncate">{enemy.riotId || "Enemy"}</span>
-            </div>
+        <div className="space-y-0.5 min-w-0">
+          {match.enemies?.slice(0, 5).map((enemy, i) => (
+            <RosterName
+              key={i}
+              entry={enemy}
+              onSelect={onSelectOtherPlayer}
+            />
           ))}
         </div>
       </div>
-    </div>
+    </article>
   );
 };

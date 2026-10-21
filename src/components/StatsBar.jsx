@@ -1,55 +1,61 @@
 import React from "react";
 import { Search, X } from "lucide-react";
+import { STATUS_FILTERS } from "../services/watchlistView";
 
-const FILTERS = [
-  { id: "ALL", label: "Все" },
-  { id: "IN_GAME", label: "В игре" },
-  { id: "NOT_IN_GAME", label: "Не в игре" },
-  { id: "PINNED", label: "Закреплённые" },
-];
 
+// Remounts on every change, so the new value rolls in like a departures board
+const AnimatedNumber = ({ value }) => (
+  <span key={value} className="fx-roll inline-block">
+    {value}
+  </span>
+);
+
+// filters: the active game's STATUS_FILTERS
 export const StatsBar = ({
   watchlist,
+  filters = STATUS_FILTERS.lol,
   filterStatus,
   setFilterStatus,
   searchQuery,
   setSearchQuery,
 }) => {
-  const counts = {
-    ALL: watchlist.length,
-    IN_GAME: watchlist.filter((p) => p.status === "IN_GAME").length,
-    NOT_IN_GAME: watchlist.filter((p) => p.status === "NOT_IN_GAME").length,
-    PINNED: watchlist.filter((p) => p.isPinned).length,
-  };
+  const counts = Object.fromEntries(
+    filters.map((f) => [f.id, watchlist.filter(f.match).length]),
+  );
+  const inGameCount = watchlist.filter((p) => p.status === "IN_GAME").length;
 
   return (
     <section
       aria-label="Сводка и фильтры"
-      className="px-5 lg:px-6 py-5 space-y-6 border-t border-line flex-1"
+      className="px-4 lg:px-6 py-4 lg:py-5 space-y-4 lg:space-y-6 border-t border-line flex-1"
     >
       {/* Big numerals */}
       <div className="grid grid-cols-2 gap-4">
         <div>
           <div
-            className={`font-display text-6xl leading-none tabular-nums ${
-              counts.IN_GAME > 0 ? "text-success" : "text-ink-2"
+            className={`font-display text-4xl lg:text-6xl leading-none tabular-nums ${
+              inGameCount > 0 ? "text-success" : "text-ink-2"
             }`}
           >
-            {counts.IN_GAME}
+            <AnimatedNumber value={inGameCount} />
           </div>
           <div className="label mt-2">в игре</div>
         </div>
         <div>
-          <div className="font-display text-6xl leading-none tabular-nums text-ink">
-            {counts.ALL}
+          <div className="font-display text-4xl lg:text-6xl leading-none tabular-nums text-ink">
+            <AnimatedNumber value={watchlist.length} />
           </div>
           <div className="label mt-2">отслеживается</div>
         </div>
       </div>
 
-      {/* Filters */}
-      <div role="group" aria-label="Фильтр по статусу">
-        {FILTERS.map((f) => {
+      {/* Filters: a row of chips on phones, a list in the rail */}
+      <div
+        role="group"
+        aria-label="Фильтр по статусу"
+        className="no-scrollbar flex gap-1.5 overflow-x-auto -mx-4 px-4 lg:block lg:mx-0 lg:px-0"
+      >
+        {filters.map((f) => {
           const active = filterStatus === f.id;
           return (
             <button
@@ -57,20 +63,22 @@ export const StatsBar = ({
               type="button"
               aria-pressed={active}
               onClick={() => setFilterStatus(f.id)}
-              className={`flex w-full items-center justify-between py-2.5 border-b border-line font-mono text-xs uppercase tracking-wider transition-colors ${
-                active ? "text-ink" : "text-ink-2 hover:text-ink"
+              className={`fx-press shrink-0 inline-flex items-center gap-2 h-8 px-3 border font-mono text-xs uppercase tracking-wider transition-colors lg:flex lg:w-full lg:justify-between lg:h-auto lg:px-0 lg:py-2.5 lg:border-0 lg:border-b lg:border-line ${
+                active
+                  ? "text-ink border-accent"
+                  : "text-ink-2 border-line hover:text-ink"
               }`}
             >
               <span className="flex items-center gap-2">
                 <span
-                  className={active ? "text-accent-ink" : "text-transparent"}
+                  className={`hidden lg:inline ${active ? "text-accent-ink" : "text-transparent"}`}
                   aria-hidden="true"
                 >
                   ›
                 </span>
                 {f.label}
               </span>
-              <span className="tabular-nums">{counts[f.id]}</span>
+              <span className="tabular-nums text-ink-2 lg:text-inherit">{counts[f.id]}</span>
             </button>
           );
         })}

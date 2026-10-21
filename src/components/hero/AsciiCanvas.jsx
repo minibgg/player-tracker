@@ -1,27 +1,11 @@
 import React, { useEffect, useRef } from "react";
+import { createScene } from "./scenes";
+import { getMotion } from "../../services/motion";
 
 // Characters ordered from faint to dense
 const RAMP = " .:-=+*xX#%@";
 const FRAME_MS = 1000 / 30;
 const ALPHA_BUCKETS = 8;
-
-// Three ridges: far (dim, slow) -> near (bright, faster). `base` is the ridge
-// height as a fraction of the canvas height, `speed` the horizontal drift.
-const LAYERS = [
-  { base: 0.38, amp: 0.1, freq: 0.9, speed: 0.12, alpha: 0.28, phase: 0 },
-  { base: 0.52, amp: 0.12, freq: 1.3, speed: 0.2, alpha: 0.5, phase: 2.1 },
-  { base: 0.67, amp: 0.13, freq: 1.8, speed: 0.32, alpha: 0.85, phase: 4.3 },
-];
-
-// Cheap smooth noise: a few detuned sines
-const ridge = (x, t, layer) => {
-  const p = x * layer.freq + t * layer.speed + layer.phase;
-  return (
-    Math.sin(p) * 0.55 +
-    Math.sin(p * 2.1 + 1.7) * 0.3 +
-    Math.sin(p * 4.3 + 0.4) * 0.15
-  );
-};
 
 const readAccent = () => {
   const v = getComputedStyle(document.documentElement)
@@ -37,10 +21,17 @@ const readFont = () =>
     .trim() || "monospace";
 
 /**
- * Animated ASCII hills drawn on a <canvas>. Capped at ~30fps, paused when
- * off-screen or when the tab is hidden, static when the user prefers reduced motion.
+ * Draws an ASCII scene (see ./scenes) on a <canvas>. Capped at ~30fps, paused
+ * when off-screen or when the tab is hidden, and a still frame unless the
+ * motion level is "full". `interactive` lets the cursor brighten glyphs and
+ * clicks reach the scene; `fontSize` overrides the glyph size (previews).
  */
-export const AsciiLandscape = ({ className = "" }) => {
+export const AsciiCanvas = ({
+  sceneId,
+  fontSize,
+  interactive = true,
+  className = "",
+}) => {
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -48,9 +39,8 @@ export const AsciiLandscape = ({ className = "" }) => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const reduceMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
+    const scene = createScene(sceneId);
+    const out = { alpha: 1, glyph: null };
 
     let width = 0;
     let height = 0;
@@ -67,6 +57,8 @@ export const AsciiLandscape = ({ className = "" }) => {
     const mouse = { x: -1000, y: -1000 };
     const start = performance.now();
 
+    const isAnimated = () => getMotion() === "full";
+
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       width = rect.width;
@@ -78,7 +70,7 @@ export const AsciiLandscape = ({ className = "" }) => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       // Fewer, larger glyphs on small screens keeps it light
-      fontPx = width < 640 ? 14 : 11;
+      fontPx = fontSize ?? (width < 640 ? 14 : 11);
       ctx.font = `${fontPx}px ${readFont()}`;
       cellW = ctx.measureText("M").width || fontPx * 0.6;
       cellH = fontPx * 1.1;
@@ -92,38 +84,22 @@ export const AsciiLandscape = ({ className = "" }) => {
     const draw = (now) => {
       if (!cols || !rows) return;
       const t = (now - start) / 1000;
+      scene.prepare(t, cols, rows);
+
       ctx.clearRect(0, 0, width, height);
       ctx.font = `${fontPx}px ${readFont()}`;
       ctx.textBaseline = "top";
       buckets.forEach((b) => (b.length = 0));
-
-      const heights = LAYERS.map((layer) => {
-        const arr = new Float32Array(cols);
-        for (let c = 0; c < cols; c++) {
-          const nx = (c / cols) * 6;
-          arr[c] = (layer.base + ridge(nx, t, layer) * layer.amp) * rows;
-        }
-        return arr;
-      });
 
       const mouseCol = mouse.x / cellW;
       const mouseRow = mouse.y / cellH;
 
       for (let c = 0; c < cols; c++) {
         for (let r = 0; r < rows; r++) {
-          // Nearest layer whose ridge is above this cell wins
-          let li = -1;
-          for (let l = LAYERS.length - 1; l >= 0; l--) {
-            if (r >= heights[l][c]) {
-              li = l;
-              break;
-            }
-          }
-          if (li < 0) continue;
-
-          const depth = r - heights[li][c]; // rows below the crest
-          // Dense at the crest, thinning out below it
-          let level = Math.exp(-depth / 5) * 0.85 + 0.12;
+          out.alpha = 1;
+          out.glyph = null;
+          let level = scene.cell(c, r, out);
+          if (!(level > 0)) continue;
 
           // Cursor: brighten nearby glyphs
           const dx = c - mouseCol;
@@ -132,10 +108,10 @@ export const AsciiLandscape = ({ className = "" }) => {
           if (d2 < 120) level += (1 - d2 / 120) * 0.45;
 
           level = Math.min(level, 1);
-          const ch = RAMP[Math.round(level * (RAMP.length - 1))];
+          const ch = out.glyph ?? RAMP[Math.round(level * (RAMP.length - 1))];
           if (ch === " ") continue;
 
-          const alpha = Math.min(LAYERS[li].alpha * (0.5 + level * 0.7), 1);
+          const alpha = Math.min(out.alpha * (0.5 + level * 0.7), 1);
           const bucket = Math.min(
             ALPHA_BUCKETS - 1,
             Math.floor(alpha * ALPHA_BUCKETS),
@@ -162,7 +138,7 @@ export const AsciiLandscape = ({ className = "" }) => {
     };
 
     const startLoop = () => {
-      if (running || reduceMotion || !visible || document.hidden) return;
+      if (running || !isAnimated() || !visible || document.hidden) return;
       running = true;
       rafId = requestAnimationFrame(frame);
     };
@@ -171,23 +147,38 @@ export const AsciiLandscape = ({ className = "" }) => {
       cancelAnimationFrame(rafId);
     };
 
-    const onResize = () => {
-      resize();
-      draw(performance.now());
+    // A still frame stays put; a running loop redraws on its own
+    const redrawIfStill = () => {
+      if (!running) draw(isAnimated() ? performance.now() : start);
     };
 
-    const onPointerMove = (e) => {
+    const onResize = () => {
+      resize();
+      redrawIfStill();
+    };
+
+    const toCell = (e) => {
       const rect = canvas.getBoundingClientRect();
-      mouse.x = e.clientX - rect.left;
-      mouse.y = e.clientY - rect.top;
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+    const onPointerMove = (e) => {
+      const p = toCell(e);
+      mouse.x = p.x;
+      mouse.y = p.y;
     };
     const onPointerLeave = () => {
       mouse.x = mouse.y = -1000;
     };
+    const onPointerDown = (e) => {
+      if (!scene.addSource || !cellW) return;
+      const p = toCell(e);
+      scene.addSource(p.x / cellW, p.y / cellH);
+      redrawIfStill();
+    };
     const onVisibility = () => (document.hidden ? stopLoop() : startLoop());
 
     resize();
-    draw(performance.now());
+    draw(start);
     startLoop();
 
     // Glyph metrics change once the webfont arrives
@@ -203,21 +194,24 @@ export const AsciiLandscape = ({ className = "" }) => {
     });
     io.observe(canvas);
 
-    // Re-read the accent colour when the theme changes
+    // Theme changes recolour; motion changes start or freeze the loop
     const mo = new MutationObserver(() => {
       rgb = readAccent();
-      draw(performance.now());
+      if (isAnimated()) startLoop();
+      else stopLoop();
+      redrawIfStill();
     });
     mo.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-theme"],
+      attributeFilter: ["data-theme", "data-motion"],
     });
 
     // Listen on the hero section: the canvas itself sits under the content
     const host = canvas.closest("section") || canvas.parentElement;
-    if (!reduceMotion) {
+    if (interactive) {
       host.addEventListener("pointermove", onPointerMove);
       host.addEventListener("pointerleave", onPointerLeave);
+      host.addEventListener("pointerdown", onPointerDown);
     }
     document.addEventListener("visibilitychange", onVisibility);
 
@@ -228,9 +222,10 @@ export const AsciiLandscape = ({ className = "" }) => {
       mo.disconnect();
       host.removeEventListener("pointermove", onPointerMove);
       host.removeEventListener("pointerleave", onPointerLeave);
+      host.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
+  }, [sceneId, fontSize, interactive]);
 
   return (
     <canvas

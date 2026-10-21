@@ -73,7 +73,7 @@ export const initDataDragon = async () => {
         currentVersion = versions[0];
       }
     }
-  } catch (e) {
+  } catch {
     console.warn("Using default Data Dragon version:", currentVersion);
   }
 

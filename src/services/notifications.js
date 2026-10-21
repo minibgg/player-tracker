@@ -60,7 +60,7 @@ export const stopMatchAlertSound = () => {
     try {
       activeAudioElement.pause();
       activeAudioElement.currentTime = 0;
-    } catch (e) {
+    } catch {
       // ignore
     }
     activeAudioElement = null;
@@ -69,7 +69,7 @@ export const stopMatchAlertSound = () => {
   if (activeAudioContext) {
     try {
       activeAudioContext.close();
-    } catch (e) {
+    } catch {
       // ignore
     }
     activeAudioContext = null;

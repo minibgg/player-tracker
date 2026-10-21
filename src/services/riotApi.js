@@ -9,6 +9,14 @@ export class RiotApiError extends Error {
   }
 }
 
+const PROXY_LABELS = {
+  vite: "локальный прокси",
+  corsproxy: "corsproxy.io",
+  allorigins: "allorigins.win",
+  custom: "свой прокси",
+  direct: "напрямую",
+};
+
 /**
  * Builds the proxied URL based on chosen proxy strategy
  */
@@ -43,7 +51,7 @@ export const buildProxiedUrl = (
 export const parseRiotId = (input, defaultTag = "EUW") => {
   if (!input || typeof input !== "string") {
     throw new RiotApiError(
-      "Please enter a valid Riot ID",
+      "Введите Riot ID, например Faker#KR1.",
       400,
       "INVALID_INPUT",
     );
@@ -54,7 +62,7 @@ export const parseRiotId = (input, defaultTag = "EUW") => {
   const tagLine = parts[1] ? parts[1].trim() : defaultTag;
 
   if (!gameName) {
-    throw new RiotApiError("Riot ID name cannot be empty", 400, "EMPTY_NAME");
+    throw new RiotApiError("В Riot ID не хватает имени перед #.", 400, "EMPTY_NAME");
   }
 
   return { gameName, tagLine };
@@ -66,7 +74,7 @@ export const parseRiotId = (input, defaultTag = "EUW") => {
 const fetchRiotEndpoint = async (targetUrl, apiKey, proxyType, customProxy) => {
   if (!apiKey) {
     throw new RiotApiError(
-      "Riot API Key is required. Please set it in Settings.",
+      "Нужен API-ключ Riot: укажите его в настройках.",
       401,
       "MISSING_API_KEY",
     );
@@ -83,9 +91,9 @@ const fetchRiotEndpoint = async (targetUrl, apiKey, proxyType, customProxy) => {
         Accept: "application/json",
       },
     });
-  } catch (err) {
+  } catch {
     throw new RiotApiError(
-      `Network / CORS error: Failed to reach Riot API via ${proxyType} proxy (${err.message}). Check your internet connection or proxy settings.`,
+      `Не удалось связаться с Riot API (${PROXY_LABELS[proxyType] || proxyType}). Проверьте интернет и настройки прокси.`,
       0,
       "NETWORK_ERROR",
     );
@@ -96,7 +104,7 @@ const fetchRiotEndpoint = async (targetUrl, apiKey, proxyType, customProxy) => {
       return await response.json();
     } catch {
       throw new RiotApiError(
-        "Invalid JSON response received from Riot API",
+        "Riot API вернул некорректный ответ.",
         500,
         "INVALID_JSON",
       );
@@ -104,12 +112,12 @@ const fetchRiotEndpoint = async (targetUrl, apiKey, proxyType, customProxy) => {
   }
 
   if (response.status === 404) {
-    throw new RiotApiError("Not found (404)", 404, "NOT_FOUND");
+    throw new RiotApiError("Не найдено (404).", 404, "NOT_FOUND");
   }
 
   if (response.status === 401 || response.status === 403) {
     throw new RiotApiError(
-      "Riot API Key is invalid or expired. Please generate a new key on Riot Developer Portal.",
+      "API-ключ Riot недействителен или истёк. Получите новый на портале разработчиков.",
       response.status,
       "INVALID_KEY",
     );
@@ -118,7 +126,7 @@ const fetchRiotEndpoint = async (targetUrl, apiKey, proxyType, customProxy) => {
   if (response.status === 429) {
     const retryAfter = response.headers.get("Retry-After");
     throw new RiotApiError(
-      `Riot API Rate limit exceeded.${retryAfter ? ` Please wait ${retryAfter}s.` : " Polling will pause briefly."}`,
+      `Превышен лимит запросов Riot API.${retryAfter ? ` Повторите через ${retryAfter} с.` : ""}`,
       429,
       "RATE_LIMITED",
     );
@@ -131,14 +139,14 @@ const fetchRiotEndpoint = async (targetUrl, apiKey, proxyType, customProxy) => {
     response.status === 504
   ) {
     throw new RiotApiError(
-      "Riot Games API service is currently unavailable or undergoing maintenance.",
+      "Riot API сейчас недоступен или на обслуживании.",
       response.status,
       "SERVER_ERROR",
     );
   }
 
   throw new RiotApiError(
-    `Riot API request failed with HTTP ${response.status}`,
+    `Запрос к Riot API не удался: HTTP ${response.status}.`,
     response.status,
     "UNKNOWN_ERROR",
   );
@@ -176,7 +184,7 @@ export const fetchPuuidByRiotId = async ({
   } catch (err) {
     if (err.status === 404) {
       throw new RiotApiError(
-        `Player "${gameName}#${tagLine}" was not found in ${region.name} (${regionalHost}). Check the spelling and tag.`,
+        `Игрок ${gameName}#${tagLine} не найден в регионе ${region.short}. Проверьте имя, тег и регион.`,
         404,
         "PLAYER_NOT_FOUND",
       );
@@ -280,6 +288,111 @@ export const checkActiveGameByPuuid = async ({
 };
 
 /**
+ * 3. Ranked standing via League-V4
+ * GET /lol/league/v4/entries/by-puuid/{puuid}
+ * Returns { solo, flex }, each { tier, rank, lp, wins, losses } or null if unranked
+ */
+export const fetchRanksByPuuid = async ({
+  puuid,
+  regionId,
+  apiKey,
+  proxyType,
+  customProxy,
+}) => {
+  const region = getRegionById(regionId);
+  const endpoint = `https://${region.platform}/lol/league/v4/entries/by-puuid/${puuid}`;
+
+  const entries = await fetchRiotEndpoint(
+    endpoint,
+    apiKey,
+    proxyType,
+    customProxy,
+  );
+
+  const pick = (queueType) => {
+    const entry = Array.isArray(entries)
+      ? entries.find((e) => e.queueType === queueType)
+      : null;
+    if (!entry) return null;
+    return {
+      tier: entry.tier,
+      rank: entry.rank,
+      lp: entry.leaguePoints || 0,
+      wins: entry.wins || 0,
+      losses: entry.losses || 0,
+    };
+  };
+
+  return { solo: pick("RANKED_SOLO_5x5"), flex: pick("RANKED_FLEX_SR") };
+};
+
+/**
+ * 4. Outcome of a finished match via Match-V5
+ * GET /lol/match/v5/matches/{matchId}
+ * Riot publishes a match a few minutes after it ends, so null means "not yet".
+ */
+export const fetchMatchResult = async ({
+  matchId,
+  puuid,
+  regionId,
+  apiKey,
+  proxyType,
+  customProxy,
+}) => {
+  const region = getRegionById(regionId);
+  const regionalHost = getRegionalHost(region.regionalRoute);
+  const endpoint = `https://${regionalHost}/lol/match/v5/matches/${matchId}`;
+
+  let match;
+  try {
+    match = await fetchRiotEndpoint(endpoint, apiKey, proxyType, customProxy);
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
+
+  const info = match?.info;
+  const participant = info?.participants?.find((p) => p.puuid === puuid);
+  if (!participant) return null;
+
+  return {
+    matchId,
+    queueId: info.queueId,
+    championId: participant.championId,
+    win: Boolean(participant.win),
+    remake: Boolean(participant.gameEndedInEarlySurrender),
+    // Arena ranks players 1-8 instead of win/loss
+    placement: info.gameMode === "CHERRY" ? participant.placement || null : null,
+    kills: participant.kills || 0,
+    deaths: participant.deaths || 0,
+    assists: participant.assists || 0,
+    duration: info.gameDuration || 0,
+    startedAt: info.gameStartTimestamp || null,
+    endedAt: info.gameEndTimestamp || Date.now(),
+  };
+};
+
+/**
+ * 5. Id of the player's most recent finished match via Match-V5
+ * GET /lol/match/v5/matches/by-puuid/{puuid}/ids?start=0&count=1
+ * Returns null when the player has no matches.
+ */
+export const fetchLatestMatchId = async ({
+  puuid,
+  regionId,
+  apiKey,
+  proxyType,
+  customProxy,
+}) => {
+  const region = getRegionById(regionId);
+  const regionalHost = getRegionalHost(region.regionalRoute);
+  const endpoint = `https://${regionalHost}/lol/match/v5/matches/by-puuid/${puuid}/ids?start=0&count=1`;
+
+  const ids = await fetchRiotEndpoint(endpoint, apiKey, proxyType, customProxy);
+  return Array.isArray(ids) && ids.length > 0 ? ids[0] : null;
+};
+
+/**
  * Test API key with a fast verification request
  */
 export const testRiotApiKey = async ({ apiKey, proxyType, customProxy }) => {
@@ -296,7 +409,7 @@ export const testRiotApiKey = async ({ apiKey, proxyType, customProxy }) => {
   } catch (err) {
     if (err.status === 404) {
       // 404 means the endpoint was reached and authenticated (key is valid!), just the specific test name didn't exist
-      return { success: true, message: "API key is valid and authorized!" };
+      return { success: true, message: "Ключ работает." };
     }
     return { success: false, error: err.message, status: err.status };
   }

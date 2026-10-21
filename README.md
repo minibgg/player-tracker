@@ -12,13 +12,17 @@ A modern, real-time client-side single-page application built with **React 19**,
   - Data Dragon CDN integration for dynamic Champion icons, Profile icons, and Summoner Spells.
   - Live running match stopwatch (`MM:SS`) ticking every second based on `gameStartTime`.
   - Full 10-Player Team Composition Viewer (Blue vs Red teams with summoner spells, champion icons, and bans).
+- **Rank & Match Results**:
+  - Solo/Duo (or Flex) tier, division and LP on every player card via League-V4.
+  - When a match ends, its result (win/loss, champion, K/D/A, duration) is fetched from Match-V5 and shown on the card, in a toast and in the status log.
+  - For ranked games, the LP gained or lost (or a promotion/demotion) is included.
 - **Riot Games Account-V1 & Spectator-V5 Flow**:
   - Handles `Name#TAG` parsing with automatic fallback to regional tags (e.g., `EUW`, `EUNE`, `RU1`, `NA1`, `KR1`).
   - Queries Account-V1 via regional routes (`europe`, `americas`, `asia`, `sea`).
   - Queries Spectator-V5 via platform routes (`euw1`, `eun1`, `na1`, `kr`, `ru`, etc.).
 - **Client-Side CORS Architecture**:
-  - Built-in **Vite Dev Server Proxy Middleware** (`/api/riot-proxy?url=...`) for zero rate-limiting during local development.
-  - Selectable public CORS proxies in Settings: `corsproxy.io`, `allorigins.win`, or custom proxy URLs.
+  - Built-in **Vite Proxy Middleware** (`/api/riot-proxy?url=...`) in both `npm run dev` and `npm run preview`; the API key never leaves your machine.
+  - Selectable public CORS proxies in Settings: `corsproxy.io`, `allorigins.win`, or custom proxy URLs (public proxies receive your API key).
   - Safe client-side storage of Riot Development API Keys in `localStorage`.
 - **Configurable Polling Engine**:
   - Periodic polling intervals: 30s, 60s, 120s, or 300s.
@@ -28,10 +32,25 @@ A modern, real-time client-side single-page application built with **React 19**,
 - **Desktop Notifications & Audio Alerts**:
   - Native browser `Notification` API triggers desktop popups when a player transitions to `IN GAME`.
   - Synthesized Web Audio API Hextech chime sound effect.
+  - Alert rules: only selected queue types (Ranked / Normal / ARAM / Other), only selected champions, optional match-result alerts, quiet hours, and a per-player mute button.
+  - Phone notifications through a Telegram bot or a Discord webhook (sent from the browser while the tracker is open).
+- **Activity Stats**:
+  - Time in game today and over 7 days, wins/losses, and a weekday × hour heatmap of when the player usually plays, built from the games the tracker has seen.
+- **Animations (Settings → Анимации)**:
+  - Four switchable ASCII hero backgrounds (landscape, rain, radar, ripples that also start from clicks) or none; a quick switch sits in the hero corner.
+  - Motion levels: auto (follows the OS "reduce motion" setting), full, calm (soft fades only, still background) and off.
+  - At the full level rows glide to their new place when the list re-sorts, a band of light crosses a row when the player starts a game, match results slide in, counters roll and modals rise into view.
+- **Backup & Install**:
+  - Export the watchlist (pins, log, stats) to a JSON file and import it on another machine.
+  - Installable as an app (PWA) from the production build (`npm run build && npm run preview`).
+- **Apex Legends Tab**:
+  - A second tab next to League with its own watchlist and API key; both games are polled on the same clock whichever tab is open, and each tab shows how many of its players are in a match.
+  - Online / in lobby / in match status, the selected legend and a live match stopwatch via the [Apex Legends Status API](https://apexlegendsapi.com/) (EA has no public API).
+  - Rank and RP on every card. After a match: RP gained or lost (ranked), plus kills, damage and a win when the player shows those trackers on the legend's banner.
+  - Optional "came online" alert and a legend filter in the alert rules; current Battle Royale and ranked maps with a countdown.
+  - PC players are found by their EA account name (Steam players too), PlayStation / Xbox by PSN ID / Gamertag, anyone (including Switch) by UID.
 - **Status Change History**:
   - Expandable event log tracking when matches were entered, champion played, queue type, and match conclusions.
-- **Built-in Demo Simulation Mode**:
-  - Instant toggle to preview active matches, notifications, timers, and team viewer without requiring an active Riot API key right away.
 
 ---
 
@@ -49,9 +68,15 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:5173/](http://localhost:5173/) in your web browser.
+Open [http://localhost:5174/](http://localhost:5174/) in your web browser.
 
-### 3. Build for Production
+### 3. Run the Tests
+
+```bash
+npm test
+```
+
+### 4. Build for Production
 
 ```bash
 npm run build
@@ -69,6 +94,16 @@ npm run preview
 5. Click **Test API Connection** to verify your setup, then click **Save Changes**.
 
 > ⚠️ **Note**: Riot Development API Keys expire every 24 hours. The app will notify you with a clear toast if your key has expired so you can quickly renew it.
+
+---
+
+## 🎯 How to Set Up Your Apex Legends API Key
+
+1. Visit [portal.apexlegendsapi.com](https://portal.apexlegendsapi.com/) and click **Create an API key**.
+2. Paste the key in **Settings → Apex Legends API ключ** and click **проверить ключ**.
+3. Switch to the **Apex** tab and add a player.
+
+> The Apex API allows cross-origin requests, so it is called straight from the browser without a proxy. A new key may make 5 requests per second; the tracker sends one request per player per poll.
 
 ---
 

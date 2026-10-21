@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { Navbar } from "./components/Navbar";
 import { AddPlayerBar } from "./components/AddPlayerBar";
 import { StatsBar } from "./components/StatsBar";
@@ -9,6 +15,9 @@ import { SettingsModal } from "./components/SettingsModal";
 import { ToastContainer } from "./components/Toast";
 import { Hero } from "./components/Hero";
 import { Reveal } from "./components/Reveal";
+import { FirstRunGuide, NoMatchesState } from "./components/EmptyState";
+import { GameTabs } from "./components/GameTabs";
+import { ApexBoard } from "./components/apex/ApexBoard";
 import {
   getStoredApiKey,
   setStoredApiKey,
@@ -24,31 +33,43 @@ import {
   setStoredSoundEnabled,
   getStoredNotificationsEnabled,
   setStoredNotificationsEnabled,
-  getStoredWatchlist,
-  setStoredWatchlist,
-  getCachedPlayer,
-  setCachedPlayer,
+  getStoredAlertRules,
+  setStoredAlertRules,
+  getStoredWebhooks,
+  setStoredWebhooks,
+  getStoredMotionPref,
+  setStoredMotionPref,
+  getStoredHeroScene,
+  setStoredHeroScene,
+  getStoredApexApiKey,
+  setStoredApexApiKey,
+  getStoredActiveGame,
+  setStoredActiveGame,
 } from "./services/storage";
-import { initDataDragon, getChampionByKey } from "./services/ddragon";
-import { getQueueInfo } from "./data/queues";
-import { getRegionById } from "./data/regions";
+import { initDataDragon } from "./services/ddragon";
 import {
-  parseRiotId,
-  fetchPuuidByRiotId,
-  fetchSummonerByPuuid,
-  checkActiveGameByPuuid,
-} from "./services/riotApi";
-import {
-  sendDesktopNotification,
-  playMatchAlertSound,
   playGameStartChime,
   stopMatchAlertSound,
   requestNotificationPermission,
   getNotificationPermission,
 } from "./services/notifications";
+import { announceTrackerEvent, announceApexEvent } from "./services/alerts";
+import {
+  resolveMotion,
+  applyMotion,
+  systemReducesMotion,
+} from "./services/motion";
+import { nextHeroScene } from "./components/hero/scenes";
+import { serializeWatchlist } from "./services/watchlistBackup";
+import { STATUS_FILTERS, viewApexPlayers } from "./services/watchlistView";
+import { useToasts } from "./hooks/useToasts";
+import { useWatchlist } from "./hooks/useWatchlist";
+import { usePlayerPolling } from "./hooks/usePlayerPolling";
+import { useApexWatchlist } from "./hooks/useApexWatchlist";
+import { useApexPolling } from "./hooks/useApexPolling";
+import { usePollTicker } from "./hooks/usePollTicker";
+import { useFlipList } from "./hooks/useFlipList";
 import { ShieldAlert } from "lucide-react";
-
-const MAX_TOASTS = 4;
 
 export default function App() {
   // Config & State
@@ -63,19 +84,42 @@ export default function App() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(
     getStoredNotificationsEnabled,
   );
+  const [alertRules, setAlertRules] = useState(getStoredAlertRules);
+  const [webhooks, setWebhooks] = useState(getStoredWebhooks);
+  const [motionPref, setMotionPref] = useState(getStoredMotionPref);
+  const [heroScene, setHeroScene] = useState(getStoredHeroScene);
+  const [apexApiKey, setApexApiKey] = useState(getStoredApexApiKey);
+  // Which board is shown; both games are polled either way
+  const [activeGame, setActiveGame] = useState(getStoredActiveGame);
+  const isApex = activeGame === "apex";
 
-  // Watchlist State: ONLY the user's own added players, defaults to empty []
-  const [watchlist, setWatchlist] = useState(() => {
-    return getStoredWatchlist();
-  });
+  // "Auto" motion follows the OS "reduce motion" switch, live
+  const [osReducesMotion, setOsReducesMotion] = useState(systemReducesMotion);
+  useEffect(() => {
+    const query = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!query) return undefined;
+    const onChange = (e) => setOsReducesMotion(e.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  const motionLevel = resolveMotion(motionPref, osReducesMotion);
+  useEffect(() => {
+    applyMotion(motionLevel);
+  }, [motionLevel]);
 
-  // UI & Tracking State
   const [isGlobalTracking, setIsGlobalTracking] = useState(true);
-  const [secondsUntilNextCheck, setSecondsUntilNextCheck] =
-    useState(pollingInterval);
-  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
-  const [checkingPlayerIds, setCheckingPlayerIds] = useState(new Set());
-  const [isAddingPlayer, setIsAddingPlayer] = useState(false);
+  // Riot answered 401/403: auto-polling waits for a new key instead of
+  // failing (and toasting) every cycle
+  const [isApiKeyRejected, setIsApiKeyRejected] = useState(false);
+  const handleAuthStatus = useCallback(
+    (ok) => setIsApiKeyRejected(!ok),
+    [],
+  );
+  const [isApexKeyRejected, setIsApexKeyRejected] = useState(false);
+  const handleApexAuthStatus = useCallback(
+    (ok) => setIsApexKeyRejected(!ok),
+    [],
+  );
 
   // Modals & Views
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -85,53 +129,95 @@ export default function App() {
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Toasts
-  const [toasts, setToasts] = useState([]);
+  // Filters differ per game, so a switch starts from the full list
+  const switchGame = (game) => {
+    if (game === activeGame) return;
+    setActiveGame(game);
+    setStoredActiveGame(game);
+    setFilterStatus("ALL");
+    setSearchQuery("");
+  };
 
-  const addToast = useCallback((type, message, title = "", duration = 4500) => {
-    setToasts((prev) => {
-      // Collapse identical toasts into one with a counter
-      const dup = prev.find(
-        (t) => t.type === type && t.message === message && t.title === title,
-      );
-      if (dup) {
-        return prev.map((t) =>
-          t === dup ? { ...t, count: (t.count || 1) + 1, duration } : t,
-        );
-      }
-      const id = Date.now() + Math.random().toString();
-      // Cap how many toasts are on screen; oldest ones are dropped
-      return [
-        ...prev,
-        { id, type, message, title, duration, count: 1 },
-      ].slice(-MAX_TOASTS);
-    });
-  }, []);
+  const { toasts, addToast, removeToast } = useToasts();
 
-  const removeToast = useCallback((id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
+  // Rows glide to their new places when the list re-sorts
+  const listRef = useRef(null);
+  useFlipList(listRef);
 
-  // Always-current view of the watchlist for async callbacks (avoids stale closures
-  // and lets us run side effects outside of state updater functions)
-  const watchlistRef = useRef(watchlist);
-  useEffect(() => {
-    watchlistRef.current = watchlist;
-  }, [watchlist]);
+  // Watchlist State: ONLY the user's own added players, defaults to empty []
+  const {
+    watchlist,
+    setWatchlist,
+    watchlistRef,
+    isAddingPlayer,
+    addPlayer,
+    togglePin,
+    toggleMute,
+    deletePlayer,
+    toggleTracking,
+    importPlayers,
+    clearWatchlist,
+  } = useWatchlist({ apiKey, proxyType, customProxy, addToast });
 
-  // Save watchlist to localStorage on change
-  useEffect(() => {
-    setStoredWatchlist(watchlist);
-  }, [watchlist]);
+  const alertSettings = useMemo(
+    () => ({
+      notificationsEnabled,
+      soundEnabled,
+      chimeEnabled,
+      alertRules,
+      webhooks,
+    }),
+    [notificationsEnabled, soundEnabled, chimeEnabled, alertRules, webhooks],
+  );
+  const handleTrackerEvent = useCallback(
+    (event) => announceTrackerEvent(event, alertSettings, addToast),
+    [alertSettings, addToast],
+  );
+  const handleApexEvent = useCallback(
+    (event) => announceApexEvent(event, alertSettings, addToast),
+    [alertSettings, addToast],
+  );
+
+  const {
+    checkPlayerStatus,
+    refreshAllPlayers,
+    isRefreshingAll,
+    checkingPlayerIds,
+  } = usePlayerPolling({
+    watchlistRef,
+    setWatchlist,
+    apiKey,
+    proxyType,
+    customProxy,
+    addToast,
+    onEvent: handleTrackerEvent,
+    onAuthStatus: handleAuthStatus,
+  });
+
+  const apex = useApexWatchlist({ apiKey: apexApiKey, addToast });
+  const apexPolling = useApexPolling({
+    watchlistRef: apex.watchlistRef,
+    setWatchlist: apex.setWatchlist,
+    apiKey: apexApiKey,
+    addToast,
+    onEvent: handleApexEvent,
+    onAuthStatus: handleApexAuthStatus,
+  });
+
+  // One clock for both games; a game whose key was rejected waits for a new one
+  const secondsUntilNextCheck = usePollTicker({
+    pollingInterval,
+    isEnabled: isGlobalTracking,
+    onTick: () => {
+      if (!isApiKeyRejected) refreshAllPlayers();
+      if (!isApexKeyRejected) apexPolling.refreshAllPlayers();
+    },
+  });
 
   // Initialize Data Dragon
   useEffect(() => {
     initDataDragon().catch(console.warn);
   }, []);
-
-  // Polling works off a wall-clock deadline instead of counting ticks, so it
-  // stays accurate when the browser throttles a background tab.
-  const nextCheckAtRef = useRef(Date.now() + pollingInterval * 1000);
 
   // Request notification permission if enabled
   useEffect(() => {
@@ -141,492 +227,17 @@ export default function App() {
   }, [notificationsEnabled]);
 
   /**
-   * Check status of an individual player
-   */
-  const checkPlayerStatus = useCallback(
-    async (player, isManual = false) => {
-      if (!player.isTracking && !isManual) return;
-
-      if (!apiKey) {
-        if (isManual) {
-          addToast(
-            "warning",
-            "Укажите Riot API Key в настройках для проверки статуса.",
-            "Требуется API ключ",
-          );
-        }
-        return;
-      }
-
-      setCheckingPlayerIds((prev) => new Set(prev).add(player.id));
-
-      try {
-        // 1. Resolve PUUID (Check cache first to save API calls)
-        let currentPuuid = player.puuid;
-        let profileIconId = player.profileIconId || 29;
-        let summonerLevel = player.summonerLevel || 1;
-
-        if (!currentPuuid) {
-          const cached = getCachedPlayer(
-            player.region,
-            player.gameName,
-            player.tagLine,
-          );
-          if (cached && cached.puuid) {
-            currentPuuid = cached.puuid;
-            profileIconId = cached.profileIconId || profileIconId;
-            summonerLevel = cached.summonerLevel || summonerLevel;
-          } else {
-            // Query Account-V1
-            const accountData = await fetchPuuidByRiotId({
-              gameName: player.gameName,
-              tagLine: player.tagLine,
-              regionId: player.region,
-              apiKey,
-              proxyType,
-              customProxy,
-            });
-            currentPuuid = accountData.puuid;
-
-            // Fetch summoner icon and level
-            try {
-              const summonerData = await fetchSummonerByPuuid({
-                puuid: currentPuuid,
-                regionId: player.region,
-                apiKey,
-                proxyType,
-                customProxy,
-              });
-              profileIconId = summonerData.profileIconId || 29;
-              summonerLevel = summonerData.summonerLevel || 1;
-            } catch {
-              // Non-blocking
-            }
-
-            // Save to permanent player cache
-            setCachedPlayer(player.region, player.gameName, player.tagLine, {
-              puuid: currentPuuid,
-              profileIconId,
-              summonerLevel,
-              gameName: player.gameName,
-              tagLine: player.tagLine,
-              region: player.region,
-            });
-          }
-        }
-
-        // 2. Check Spectator-V5
-        const spectatorResult = await checkActiveGameByPuuid({
-          puuid: currentPuuid,
-          regionId: player.region,
-          apiKey,
-          proxyType,
-          customProxy,
-        });
-
-        // Player may have been deleted while the request was in flight
-        const p = watchlistRef.current.find((item) => item.id === player.id);
-        if (!p) return;
-
-        const wasInGame = p.status === "IN_GAME";
-        const isNowInGame = spectatorResult.isInGame;
-        let history = p.statusHistory || [];
-
-        // Transition: OFFLINE -> IN GAME
-        if (!wasInGame && isNowInGame) {
-          const champ = getChampionByKey(spectatorResult.championId);
-          const queue = getQueueInfo(spectatorResult.queueId);
-
-          history = [
-            {
-              timestamp: Date.now(),
-              status: "IN_GAME",
-              championId: spectatorResult.championId,
-              queueId: spectatorResult.queueId,
-              message: `Начал матч (${queue.name}) за ${champ.name}`,
-            },
-            ...history.slice(0, 19),
-          ];
-
-          // Trigger Notifications & Audio (Siren only for pinned players)
-          const isPinned = Boolean(p.isPinned);
-          const shouldPlaySiren = soundEnabled && isPinned;
-
-          if (notificationsEnabled) {
-            sendDesktopNotification(
-              `${p.gameName} сейчас В ИГРЕ!${isPinned ? " 📌" : ""}`,
-              {
-                body: `Чемпион: ${champ.name} | Режим: ${queue.name}`,
-              },
-              shouldPlaySiren,
-            );
-          } else if (shouldPlaySiren) {
-            playMatchAlertSound();
-          }
-
-          // Soft chime for any player; the siren already covers pinned ones
-          if (chimeEnabled && !shouldPlaySiren) {
-            playGameStartChime();
-          }
-
-          addToast(
-            "success",
-            `${p.gameName} начал матч за ${champ.name}!`,
-            "Игрок в матче",
-          );
-        }
-        // Transition: IN GAME -> NOT IN GAME
-        else if (wasInGame && !isNowInGame) {
-          history = [
-            {
-              timestamp: Date.now(),
-              status: "NOT_IN_GAME",
-              message: "Матч завершён",
-            },
-            ...history.slice(0, 19),
-          ];
-
-          addToast("info", `${p.gameName} больше не в матче.`, "Матч завершён");
-        }
-
-        setWatchlist((prevList) =>
-          prevList.map((item) =>
-            item.id !== player.id
-              ? item
-              : {
-                  ...item,
-                  puuid: currentPuuid,
-                  profileIconId,
-                  summonerLevel,
-                  status: isNowInGame ? "IN_GAME" : "NOT_IN_GAME",
-                  currentGame: isNowInGame ? spectatorResult.gameData : null,
-                  lastChecked: Date.now(),
-                  statusHistory: history,
-                },
-          ),
-        );
-      } catch (err) {
-        console.error(`Error checking player ${player.gameName}:`, err);
-
-        if (err.status === 401 || err.status === 403) {
-          addToast(
-            "error",
-            "Riot API Key истек или недействителен. Обновите его в настройках.",
-            "Ошибка авторизации",
-          );
-        } else if (err.status === 429) {
-          addToast(
-            "warning",
-            "Превышен лимит запросов Riot API. Опрос временно замедлен.",
-            "Лимит запросов (429)",
-          );
-          return "RATE_LIMITED";
-        } else {
-          addToast(
-            "error",
-            err.message || "Не удалось проверить статус матча.",
-            `Ошибка (${player.gameName})`,
-          );
-        }
-      } finally {
-        setCheckingPlayerIds((prev) => {
-          const next = new Set(prev);
-          next.delete(player.id);
-          return next;
-        });
-      }
-    },
-    [
-      apiKey,
-      proxyType,
-      customProxy,
-      notificationsEnabled,
-      soundEnabled,
-      chimeEnabled,
-      addToast,
-    ],
-  );
-
-  /**
-   * Check all players currently in watchlist
-   */
-  const isRefreshingRef = useRef(false);
-  const refreshAllPlayers = useCallback(async () => {
-    if (isRefreshingRef.current) return;
-    isRefreshingRef.current = true;
-    setIsRefreshingAll(true);
-
-    try {
-      const activeList = watchlistRef.current.filter((p) => p.isTracking);
-      for (const player of activeList) {
-        // Stop the whole pass on 429 instead of hammering the API further
-        if ((await checkPlayerStatus(player, false)) === "RATE_LIMITED") break;
-        // Timers are throttled hard in background tabs, so skip the pause there
-        if (!document.hidden) await new Promise((r) => setTimeout(r, 150));
-      }
-    } finally {
-      isRefreshingRef.current = false;
-      setIsRefreshingAll(false);
-    }
-  }, [checkPlayerStatus]);
-
-  const refreshAllRef = useRef(refreshAllPlayers);
-  useEffect(() => {
-    refreshAllRef.current = refreshAllPlayers;
-  }, [refreshAllPlayers]);
-
-  // Restart the countdown when the interval changes or tracking resumes
-  useEffect(() => {
-    nextCheckAtRef.current = Date.now() + pollingInterval * 1000;
-    setSecondsUntilNextCheck(pollingInterval);
-  }, [pollingInterval, isGlobalTracking]);
-
-  // Ticker. A Web Worker timer is not throttled in background tabs (setInterval
-  // on the page is, down to ~1/min), so checks keep running when you switch tabs.
-  useEffect(() => {
-    if (!isGlobalTracking) return;
-
-    const tick = () => {
-      const left = Math.ceil((nextCheckAtRef.current - Date.now()) / 1000);
-      if (left <= 0) {
-        nextCheckAtRef.current = Date.now() + pollingInterval * 1000;
-        setSecondsUntilNextCheck(pollingInterval);
-        refreshAllRef.current();
-      } else {
-        setSecondsUntilNextCheck(left);
-      }
-    };
-
-    let worker = null;
-    let fallbackTimer = null;
-    try {
-      const url = URL.createObjectURL(
-        new Blob(["setInterval(() => postMessage(0), 1000);"], {
-          type: "text/javascript",
-        }),
-      );
-      worker = new Worker(url);
-      worker.onmessage = tick;
-      URL.revokeObjectURL(url);
-    } catch {
-      fallbackTimer = setInterval(tick, 1000);
-    }
-
-    // Catch up immediately when the tab becomes visible again
-    const onVisible = () => {
-      if (!document.hidden) tick();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-
-    return () => {
-      worker?.terminate();
-      if (fallbackTimer) clearInterval(fallbackTimer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [isGlobalTracking, pollingInterval]);
-
-  /**
-   * Add a new player to the watchlist with permanent caching
-   */
-  const handleAddPlayer = async ({ rawInput, regionId, isPinned = false }) => {
-    setIsAddingPlayer(true);
-    const region = getRegionById(regionId);
-
-    try {
-      const { gameName, tagLine } = parseRiotId(rawInput, region.defaultTag);
-
-      // Check if already in watchlist
-      const existing = watchlist.find(
-        (p) =>
-          p.gameName.toLowerCase() === gameName.toLowerCase() &&
-          p.tagLine.toLowerCase() === tagLine.toLowerCase() &&
-          p.region.toLowerCase() === regionId.toLowerCase(),
-      );
-      if (existing) {
-        addToast(
-          "info",
-          `${gameName}#${tagLine} уже есть в вашем списке.`,
-          "Уже добавлен",
-        );
-        setIsAddingPlayer(false);
-        return;
-      }
-
-      // Check cache first!
-      let puuid = null;
-      let profileIconId = 29;
-      let summonerLevel = 1;
-      let initialStatus = "NOT_IN_GAME";
-      let currentGame = null;
-
-      const cached = getCachedPlayer(regionId, gameName, tagLine);
-      if (cached && cached.puuid) {
-        puuid = cached.puuid;
-        profileIconId = cached.profileIconId || 29;
-        summonerLevel = cached.summonerLevel || 1;
-      } else {
-        // Query Riot Account-V1
-        const accountData = await fetchPuuidByRiotId({
-          gameName,
-          tagLine,
-          regionId,
-          apiKey,
-          proxyType,
-          customProxy,
-        });
-
-        puuid = accountData.puuid;
-
-        // Query Summoner-V4 for icon & level
-        try {
-          const summonerData = await fetchSummonerByPuuid({
-            puuid,
-            regionId,
-            apiKey,
-            proxyType,
-            customProxy,
-          });
-          profileIconId = summonerData.profileIconId || 29;
-          summonerLevel = summonerData.summonerLevel || 1;
-        } catch {
-          // Proceed with defaults
-        }
-
-        // Cache permanently in localStorage
-        setCachedPlayer(regionId, gameName, tagLine, {
-          puuid,
-          profileIconId,
-          summonerLevel,
-          gameName,
-          tagLine,
-          region: regionId,
-        });
-      }
-
-      // Check active game immediately
-      try {
-        const spectatorData = await checkActiveGameByPuuid({
-          puuid,
-          regionId,
-          apiKey,
-          proxyType,
-          customProxy,
-        });
-
-        if (spectatorData.isInGame) {
-          initialStatus = "IN_GAME";
-          currentGame = spectatorData.gameData;
-        }
-      } catch (e) {
-        console.warn("Initial spectator check error:", e);
-      }
-
-      const newPlayer = {
-        id: `player-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        gameName,
-        tagLine,
-        region: regionId,
-        puuid,
-        profileIconId,
-        summonerLevel,
-        isPinned: Boolean(isPinned),
-        isTracking: true,
-        status: initialStatus,
-        currentGame,
-        lastChecked: Date.now(),
-        statusHistory: [
-          {
-            timestamp: Date.now(),
-            status: initialStatus,
-            message:
-              initialStatus === "IN_GAME"
-                ? "Добавлен (в матче)"
-                : "Добавлен в список отслеживания",
-          },
-        ],
-      };
-
-      setWatchlist((prev) => [newPlayer, ...prev]);
-      addToast(
-        "success",
-        `${gameName}#${tagLine} добавлен и закэширован.${isPinned ? " (Закреплен вверху)" : ""}`,
-        "Игрок сохранен",
-      );
-    } catch (err) {
-      console.error("Failed to add player:", err);
-      addToast(
-        "error",
-        err.message || "Не удалось найти игрока. Проверьте имя, тег и регион.",
-        "Ошибка поиска",
-      );
-    } finally {
-      setIsAddingPlayer(false);
-    }
-  };
-
-  /**
-   * Toggle Pin player to top of list
-   */
-  const handleTogglePin = (playerId) => {
-    const player = watchlistRef.current.find((p) => p.id === playerId);
-    if (!player) return;
-    const nextState = !player.isPinned;
-
-    setWatchlist((prev) =>
-      prev.map((p) => (p.id === playerId ? { ...p, isPinned: nextState } : p)),
-    );
-    addToast(
-      "info",
-      nextState
-        ? `Игрок ${player.gameName} закреплен вверху списка.`
-        : `Игрок ${player.gameName} откреплен.`,
-      "Закрепление",
-    );
-  };
-
-  /**
-   * Delete player from watchlist
-   */
-  const handleDeletePlayer = (playerId) => {
-    const player = watchlist.find((p) => p.id === playerId);
-    setWatchlist((prev) => prev.filter((p) => p.id !== playerId));
-    if (player) {
-      addToast("info", `Игрок ${player.gameName} удален из списка.`, "Удалено");
-    }
-  };
-
-  /**
-   * Toggle tracking pause/resume for individual player
-   */
-  const handleToggleTracking = (playerId) => {
-    setWatchlist((prev) =>
-      prev.map((p) => {
-        if (p.id !== playerId) return p;
-        const nextState = !p.isTracking;
-        return {
-          ...p,
-          isTracking: nextState,
-          statusHistory: [
-            {
-              timestamp: Date.now(),
-              status: p.status,
-              message: nextState
-                ? "Отслеживание возобновлено"
-                : "Отслеживание приостановлено",
-            },
-            ...(p.statusHistory || []),
-          ],
-        };
-      }),
-    );
-  };
-
-  /**
    * Save Settings
    */
   const handleSaveSettings = (newSettings) => {
+    // Saving gives the key another try; a bad key gets flagged again on the next check
+    setIsApiKeyRejected(false);
     setApiKey(newSettings.apiKey);
     setStoredApiKey(newSettings.apiKey);
+
+    setIsApexKeyRejected(false);
+    setApexApiKey(newSettings.apexApiKey);
+    setStoredApexApiKey(newSettings.apexApiKey);
 
     setProxyType(newSettings.proxyType);
     setStoredProxyType(newSettings.proxyType);
@@ -646,29 +257,54 @@ export default function App() {
     setChimeEnabled(newSettings.chimeEnabled);
     setStoredChimeEnabled(newSettings.chimeEnabled);
 
+    setAlertRules(newSettings.alertRules);
+    setStoredAlertRules(newSettings.alertRules);
+
+    setWebhooks(newSettings.webhooks);
+    setStoredWebhooks(newSettings.webhooks);
+
+    setMotionPref(newSettings.motionPref);
+    setStoredMotionPref(newSettings.motionPref);
+
+    setHeroScene(newSettings.heroScene);
+    setStoredHeroScene(newSettings.heroScene);
+
     addToast("success", "Настройки успешно сохранены.", "Сохранено");
   };
 
-  /**
-   * Reset Watchlist
-   */
-  const handleResetWatchlist = () => {
-    if (
-      window.confirm("Вы действительно хотите очистить весь список игроков?")
-    ) {
-      setWatchlist([]);
-      addToast("info", "Список игроков очищен.", "Очищено");
-    }
+
+  // Downloads the watchlist as a JSON file
+  const handleExportWatchlist = () => {
+    const blob = new Blob(
+      [serializeWatchlist(watchlist, new Date(), apex.watchlist)],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `player-tracker-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    addToast(
+      "success",
+      `Сохранено игроков: ${watchlist.length + apex.watchlist.length}.`,
+      "Экспорт списка",
+    );
+  };
+
+  // One backup file carries both lists
+  const handleImportWatchlist = (fileText) => {
+    importPlayers(fileText);
+    apex.importPlayers(fileText);
   };
 
   // Filter and sort: PINNED PLAYERS ALWAYS FIRST!
+  const statusFilter =
+    STATUS_FILTERS.lol.find((f) => f.id === filterStatus) ||
+    STATUS_FILTERS.lol[0];
   const filteredAndSortedWatchlist = watchlist
     .filter((player) => {
-      if (filterStatus === "PINNED" && !player.isPinned) return false;
-      if (filterStatus === "IN_GAME" && player.status !== "IN_GAME")
-        return false;
-      if (filterStatus === "NOT_IN_GAME" && player.status !== "NOT_IN_GAME")
-        return false;
+      if (!statusFilter.match(player)) return false;
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -689,17 +325,60 @@ export default function App() {
       return 0;
     });
 
+  const apexPlayers = viewApexPlayers(apex.watchlist, {
+    status: filterStatus,
+    query: searchQuery,
+  });
+
+  // The rail shows the active game: its clock state, list and "check all"
+  const activeList = isApex ? apex.watchlist : watchlist;
+  const activeKey = isApex ? apexApiKey : apiKey;
+  const activeRefreshAll = isApex
+    ? apexPolling.refreshAllPlayers
+    : refreshAllPlayers;
+  const isActiveRefreshing = isApex
+    ? apexPolling.isRefreshingAll
+    : isRefreshingAll;
+
+  // Why automatic checks aren't running right now, if they aren't
+  const trackedCount = activeList.filter((p) => p.isTracking).length;
+  const pollIdleReason = (() => {
+    if (!activeKey) return "нужен API-ключ";
+    if (isApex && isApexKeyRejected) return "ключ Apex отклонён";
+    if (!isApex && isApiKeyRejected) return "ключ отклонён Riot";
+    if (activeList.length === 0) return "список пуст";
+    if (trackedCount === 0) return "все игроки на паузе";
+    if (!isGlobalTracking) return "автоопрос на паузе";
+    return null;
+  })();
+
   return (
     <div className="min-h-screen bg-canvas text-ink font-sans lg:grid lg:grid-cols-[19rem_minmax(0,1fr)]">
+      {/* Keyboard users can jump past the control rail */}
+      <a
+        href="#watchlist"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[70] focus:px-4 focus:py-2 focus:bg-accent focus:text-accent-fg font-mono text-xs"
+      >
+        к списку игроков
+      </a>
       {/* Control rail: clock, controls, counters, filters */}
       <aside className="flex flex-col border-b lg:border-b-0 lg:border-r border-line lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto">
+        <GameTabs
+          activeGame={activeGame}
+          onChange={switchGame}
+          liveCounts={{
+            lol: watchlist.filter((p) => p.status === "IN_GAME").length,
+            apex: apex.watchlist.filter((p) => p.status === "IN_GAME").length,
+          }}
+        />
         <Navbar
+          gameLabel={isApex ? "Apex" : "LoL"}
           isGlobalTracking={isGlobalTracking}
           toggleGlobalTracking={() => setIsGlobalTracking(!isGlobalTracking)}
           secondsUntilNextCheck={secondsUntilNextCheck}
           pollingInterval={pollingInterval}
-          isRefreshingAll={isRefreshingAll}
-          refreshAllPlayers={refreshAllPlayers}
+          isRefreshingAll={isActiveRefreshing}
+          refreshAllPlayers={activeRefreshAll}
           chimeEnabled={chimeEnabled}
           toggleChime={() => {
             const next = !chimeEnabled;
@@ -717,10 +396,13 @@ export default function App() {
             setStoredSoundEnabled(next);
           }}
           openSettings={() => setIsSettingsOpen(true)}
-          hasApiKey={Boolean(apiKey)}
+          hasApiKey={Boolean(activeKey)}
+          idleReason={pollIdleReason}
+          canCheckNow={Boolean(activeKey) && trackedCount > 0}
         />
         <StatsBar
-          watchlist={watchlist}
+          watchlist={activeList}
+          filters={STATUS_FILTERS[activeGame]}
           filterStatus={filterStatus}
           setFilterStatus={setFilterStatus}
           searchQuery={searchQuery}
@@ -729,95 +411,157 @@ export default function App() {
       </aside>
 
       <div className="min-w-0 flex flex-col min-h-screen">
-        <Hero />
+        <Hero
+          scene={heroScene}
+          onCycleScene={() => {
+            const next = nextHeroScene(heroScene);
+            setHeroScene(next);
+            setStoredHeroScene(next);
+          }}
+          subtitle={
+            isApex
+              ? "Живой список игроков Apex Legends: уведомление, когда игрок появляется в сети и заходит в матч."
+              : "Живой список аккаунтов League of Legends: уведомление в момент, когда матч начинается."
+          }
+        />
+        {/* The hero (and its h1) is hidden on phones */}
+        <h1 className="sr-only sm:hidden">Кто сейчас в игре</h1>
 
-        <main className="flex-1 w-full max-w-5xl px-4 lg:px-10 py-8 space-y-10">
-          {/* API Key Missing Alert */}
-          {!apiKey && (
-            <div
-              role="alert"
-              className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-warn/50 bg-warn/10 px-4 py-3"
-            >
-              <div className="flex items-start gap-3">
-                <ShieldAlert className="w-4 h-4 text-warn shrink-0 mt-0.5" />
-                <div className="text-sm text-ink">
-                  Нужен Riot Development API Key.{" "}
-                  <span className="text-ink-2">
-                    Бесплатный ключ выдаёт портал разработчиков Riot.
+        <main
+          id="game-panel"
+          role="tabpanel"
+          aria-labelledby={`tab-${activeGame}`}
+          className="flex-1 w-full max-w-6xl px-4 lg:px-10 py-8 space-y-10"
+        >
+          {isApex ? (
+            <ApexBoard
+              apiKey={apexApiKey}
+              isKeyRejected={isApexKeyRejected}
+              openSettings={() => setIsSettingsOpen(true)}
+              watchlist={apex.watchlist}
+              players={apexPlayers}
+              isAddingPlayer={apex.isAddingPlayer}
+              onAddPlayer={apex.addPlayer}
+              onCheckPlayer={(p) => apexPolling.checkPlayerStatus(p, true)}
+              checkingPlayerIds={apexPolling.checkingPlayerIds}
+              onToggleTracking={apex.toggleTracking}
+              onDeletePlayer={apex.deletePlayer}
+              onTogglePin={apex.togglePin}
+              onToggleMute={apex.toggleMute}
+              onResetFilter={() => {
+                setFilterStatus("ALL");
+                setSearchQuery("");
+              }}
+              listRef={listRef}
+            />
+          ) : (
+            <>
+              {/* Missing or rejected key with players in the list; the first-run
+                  guide covers the empty case */}
+              {(isApiKeyRejected || !apiKey) && watchlist.length > 0 && (
+                <div
+                  role="alert"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-warn/50 bg-warn/10 px-4 py-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <ShieldAlert className="w-4 h-4 text-warn shrink-0 mt-0.5" />
+                    <div className="text-sm text-ink">
+                      {apiKey ? "Riot отклонил API-ключ." : "Нужен API-ключ Riot."}{" "}
+                      <span className="text-ink-2">
+                        {apiKey
+                          ? "Development-ключ живёт 24 часа: получите новый на портале Riot. Автоопрос ждёт новый ключ."
+                          : "Без него список не обновляется. Бесплатный ключ выдаёт портал разработчиков Riot."}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="btn-primary px-4 h-9 font-mono text-xs shrink-0"
+                  >
+                    {apiKey ? "обновить ключ" : "указать ключ"}
+                  </button>
+                </div>
+              )}
+
+              <Reveal>
+                <AddPlayerBar
+                  onAddPlayer={addPlayer}
+                  isAdding={isAddingPlayer}
+                  hasApiKey={Boolean(apiKey)}
+                  openSettings={() => setIsSettingsOpen(true)}
+                />
+              </Reveal>
+
+              {/* Watchlist board */}
+              <section
+                id="watchlist"
+                tabIndex={-1}
+                aria-label="Список наблюдения"
+                className="focus:outline-none"
+              >
+                <div className="flex items-baseline justify-between mb-2">
+                  <h2 className="label">Список</h2>
+                  <span className="label tabular-nums">
+                    {filteredAndSortedWatchlist.length} / {watchlist.length}
                   </span>
                 </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsSettingsOpen(true)}
-                className="btn-primary px-4 h-9 font-mono text-xs shrink-0"
-              >
-                указать ключ
-              </button>
-            </div>
+
+                {watchlist.length === 0 ? (
+                  <FirstRunGuide
+                    hasApiKey={Boolean(apiKey)}
+                    openSettings={() => setIsSettingsOpen(true)}
+                    focusAddInput={() =>
+                      document.getElementById("riot-id-input")?.focus()
+                    }
+                  />
+                ) : filteredAndSortedWatchlist.length === 0 ? (
+                  <NoMatchesState
+                    onReset={() => {
+                      setFilterStatus("ALL");
+                      setSearchQuery("");
+                    }}
+                  />
+                ) : (
+                  <div ref={listRef} className="relative border-t border-line">
+                    {filteredAndSortedWatchlist.map((player, index) => (
+                      <Reveal
+                        key={player.id}
+                        data-flip-id={player.id}
+                        delay={Math.min(index, 8) * 60}
+                      >
+                        <PlayerCard
+                          player={player}
+                          onCheckPlayer={(p) => checkPlayerStatus(p, true)}
+                          onToggleTracking={toggleTracking}
+                          onDeletePlayer={deletePlayer}
+                          onViewMatch={(p) => setActiveMatchModalPlayer(p)}
+                          onTogglePin={togglePin}
+                          onToggleMute={toggleMute}
+                          onOpenMatchHistory={(p) => setSelectedPlayerForHistory(p)}
+                          isChecking={checkingPlayerIds.has(player.id)}
+                        />
+                      </Reveal>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </>
           )}
-
-          <Reveal>
-            <AddPlayerBar
-              onAddPlayer={handleAddPlayer}
-              isAdding={isAddingPlayer}
-              hasApiKey={Boolean(apiKey)}
-              openSettings={() => setIsSettingsOpen(true)}
-            />
-          </Reveal>
-
-          {/* Watchlist board */}
-          <section aria-label="Список наблюдения">
-            <div className="flex items-baseline justify-between mb-2">
-              <h2 className="label">Список</h2>
-              <span className="label tabular-nums">
-                {filteredAndSortedWatchlist.length} / {watchlist.length}
-              </span>
-            </div>
-
-            {filteredAndSortedWatchlist.length === 0 ? (
-              <div className="border border-dashed border-line-strong px-6 py-14 text-center">
-                <div
-                  className="font-mono text-ink-2 text-sm"
-                  aria-hidden="true"
-                >
-                  [ пусто ]
-                </div>
-                <div className="font-display text-xl mt-3">
-                  {watchlist.length === 0
-                    ? "Список игроков пуст"
-                    : "Нет игроков по выбранному фильтру"}
-                </div>
-                <p className="text-sm text-ink-2 max-w-md mx-auto mt-2">
-                  {watchlist.length === 0
-                    ? "Введите Riot ID в строке выше, например Игрок#EUW, и список начнёт обновляться сам."
-                    : "Измените фильтр слева или очистите поиск."}
-                </p>
-              </div>
-            ) : (
-              <div className="border-t border-line">
-                {filteredAndSortedWatchlist.map((player, index) => (
-                  <Reveal key={player.id} delay={Math.min(index, 8) * 60}>
-                    <PlayerCard
-                      player={player}
-                      onCheckPlayer={(p) => checkPlayerStatus(p, true)}
-                      onToggleTracking={handleToggleTracking}
-                      onDeletePlayer={handleDeletePlayer}
-                      onViewMatch={(p) => setActiveMatchModalPlayer(p)}
-                      onTogglePin={handleTogglePin}
-                      onOpenMatchHistory={(p) => setSelectedPlayerForHistory(p)}
-                      isChecking={checkingPlayerIds.has(player.id)}
-                    />
-                  </Reveal>
-                ))}
-              </div>
-            )}
-          </section>
         </main>
 
         <footer className="px-4 lg:px-10 py-6 border-t border-line label flex flex-wrap justify-between gap-2">
-          <span>League Spectator Tracker</span>
-          <span>Riot Spectator-V5 · Match-V5</span>
+          {isApex ? (
+            <>
+              <span>Apex Legends Tracker</span>
+              <span>данные: apexlegendsstatus.com</span>
+            </>
+          ) : (
+            <>
+              <span>League Spectator Tracker</span>
+              <span>Riot Spectator-V5 · Match-V5</span>
+            </>
+          )}
         </footer>
       </div>
 
@@ -838,13 +582,14 @@ export default function App() {
         proxyType={proxyType}
         customProxy={customProxy}
         onSelectOtherPlayer={(otherPlayer) => {
+          // A fresh object: nothing (PUUID, level) may leak from the
+          // player whose history was open before
+          const [gameName, tagLine = ""] = (otherPlayer.riotId || "").split("#");
           setSelectedPlayerForHistory({
-            ...selectedPlayerForHistory,
-            gameName:
-              otherPlayer.riotId?.split("#")[0] ||
-              otherPlayer.riotId ||
-              "Player",
-            tagLine: otherPlayer.riotId?.split("#")[1] || "",
+            region: selectedPlayerForHistory.region,
+            puuid: otherPlayer.puuid || null,
+            gameName: gameName || "Игрок",
+            tagLine,
             profileIconId: otherPlayer.profileIconId || 29,
           });
         }}
@@ -855,20 +600,25 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         apiKey={apiKey}
-        setApiKey={setApiKey}
+        apexApiKey={apexApiKey}
         proxyType={proxyType}
-        setProxyType={setProxyType}
         customProxy={customProxy}
-        setCustomProxy={setCustomProxy}
         pollingInterval={pollingInterval}
-        setPollingInterval={setPollingInterval}
         notificationsEnabled={notificationsEnabled}
-        setNotificationsEnabled={setNotificationsEnabled}
         chimeEnabled={chimeEnabled}
         soundEnabled={soundEnabled}
-        setSoundEnabled={setSoundEnabled}
+        alertRules={alertRules}
+        webhooks={webhooks}
+        motionPref={motionPref}
+        motionLevel={motionLevel}
+        heroScene={heroScene}
         onSave={handleSaveSettings}
-        onResetWatchlist={handleResetWatchlist}
+        activeGameName={isApex ? "Apex" : "League"}
+        onResetWatchlist={isApex ? apex.clearWatchlist : clearWatchlist}
+        onExportWatchlist={handleExportWatchlist}
+        onImportWatchlist={handleImportWatchlist}
+        watchlistSize={activeList.length}
+        backupSize={watchlist.length + apex.watchlist.length}
       />
 
       {/* Toast Notification Container */}

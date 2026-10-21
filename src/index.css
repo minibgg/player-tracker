@@ -43,6 +43,11 @@
   --c-info: 143 179 204;
   --c-team-blue: 130 165 215;
   --c-scrim: 0 0 0;
+  /* Activity heatmap: one hue, few -> many games (brighter on dark) */
+  --c-heat-1: 140 54 38; /* #8C3626 */
+  --c-heat-2: 181 68 48; /* #B54430 */
+  --c-heat-3: 224 82 58; /* #E0523A */
+  --c-heat-4: 245 138 114; /* #F58A72 */
 
   --glow: 0 0 40px rgb(224 82 58 / 0.15);
   --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.3);
@@ -66,6 +71,11 @@
   --c-info: 77 111 134;
   --c-team-blue: 66 104 160;
   --c-scrim: 20 20 19;
+  /* Heatmap steps get darker with more games on cream */
+  --c-heat-1: 227 121 95; /* #E3795F */
+  --c-heat-2: 216 74 50; /* #D84A32 */
+  --c-heat-3: 176 52 30; /* #B0341E */
+  --c-heat-4: 127 33 18; /* #7F2112 */
 
   --glow: 0 0 40px rgb(224 82 58 / 0.12);
   --shadow-soft: 0 1px 2px rgb(20 20 19 / 0.04), 0 4px 16px rgb(20 20 19 / 0.05);
@@ -149,6 +159,15 @@
   background: rgb(var(--c-ink-2));
 }
 
+/* Swipe-scrolled rows (filter chips on phones) without a scrollbar */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Cards: border highlight + small lift on hover */
 .card {
   background-color: rgb(var(--c-surface));
@@ -211,6 +230,14 @@
   box-shadow: 0 0 20px rgb(var(--c-accent) / 0.15);
 }
 
+/* ------------------------------------------------------------------
+   Motion. <html data-motion> is "full", "calm" or "off" (Settings →
+   Анимации; "auto" resolves to full, or calm when the OS asks to reduce
+   motion). Effects use fx-* classes that only animate at the levels
+   listed for them: calm keeps soft fades and drops anything that moves,
+   off drops everything except loading spinners.
+   ------------------------------------------------------------------ */
+
 /* Scroll reveal: fade + rise, staggered via --reveal-delay */
 .reveal {
   opacity: 0;
@@ -260,22 +287,187 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+@keyframes fx-fade-in {
+  from {
+    opacity: 0;
   }
+}
 
-  .reveal {
+@keyframes fx-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Modals rise into place, the settings sheet slides in from the edge */
+@keyframes fx-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+}
+
+@keyframes fx-sheet-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+/* Counter digits roll up like a departures board */
+@keyframes fx-roll-in {
+  from {
+    opacity: 0;
+    transform: translateY(45%);
+  }
+}
+
+@keyframes fx-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+
+@keyframes fx-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  60% {
     opacity: 1;
-    transform: none;
+    transform: scale(1.1);
   }
+  100% {
+    transform: scale(1);
+  }
+}
 
-  .card:hover {
-    transform: none;
+/* A band of light crossing a row when the player starts a game */
+@keyframes fx-sweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-100%);
   }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fx-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes fx-cell {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+}
+
+/* Hidden unless the full level plays it */
+.fx-sweep {
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-motion="full"] .fx-fade,
+[data-motion="calm"] .fx-fade {
+  animation: fx-fade-in 180ms var(--ease) both;
+}
+
+[data-motion="full"] .fx-modal {
+  animation: fx-modal-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+[data-motion="full"] .fx-sheet {
+  animation: fx-sheet-in 340ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+[data-motion="full"] .fx-roll {
+  animation: fx-roll-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+[data-motion="full"] .fx-slide-in {
+  animation: fx-slide-in 450ms var(--ease) both;
+}
+
+[data-motion="full"] .fx-pop {
+  animation: fx-pop 560ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+[data-motion="full"] .fx-sweep {
+  animation: fx-sweep 1.3s var(--ease) both;
+}
+
+[data-motion="full"] .fx-expand {
+  animation: fx-expand 280ms var(--ease) both;
+}
+
+[data-motion="full"] .fx-cell {
+  animation: fx-cell 380ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--fx-delay, 0ms);
+}
+
+[data-motion="full"] .fx-press {
+  transition-property: color, background-color, border-color, transform;
+  transition-duration: 150ms;
+}
+
+[data-motion="full"] .fx-press:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+/* Calm: the same moments, as plain fades */
+[data-motion="calm"] .fx-modal,
+[data-motion="calm"] .fx-sheet,
+[data-motion="calm"] .fx-slide-in,
+[data-motion="calm"] .fx-expand {
+  animation: fx-fade-in 200ms var(--ease) both;
+}
+
+[data-motion="calm"] .reveal {
+  transform: none;
+}
+
+[data-motion="calm"] .toast-enter {
+  animation-name: fx-fade-in;
+}
+
+[data-motion="calm"] .toast-leave {
+  animation-name: fx-fade-out;
+}
+
+[data-motion="calm"] .card:hover {
+  transform: none;
+}
+
+/* Off: nothing moves; spinners stay, they tell that something is loading */
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+[data-motion="off"] .animate-spin {
+  animation-duration: 1s !important;
+  animation-iteration-count: infinite !important;
+}
+
+[data-motion="off"] .reveal {
+  opacity: 1;
+  transform: none;
+}
+
+[data-motion="off"] .card:hover {
+  transform: none;
 }

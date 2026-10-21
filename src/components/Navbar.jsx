@@ -21,6 +21,7 @@ const formatClock = (totalSeconds) => {
 };
 
 export const Navbar = ({
+  gameLabel = "LoL",
   isGlobalTracking,
   toggleGlobalTracking,
   secondsUntilNextCheck,
@@ -33,7 +34,10 @@ export const Navbar = ({
   toggleChime,
   openSettings,
   hasApiKey,
+  idleReason,
+  canCheckNow,
 }) => {
+  const isIdle = Boolean(idleReason);
   const progressPercent = Math.max(
     0,
     Math.min(
@@ -41,57 +45,70 @@ export const Navbar = ({
       ((pollingInterval - secondsUntilNextCheck) / pollingInterval) * 100,
     ),
   );
-  const filled = Math.round((progressPercent / 100) * BAR_CELLS);
+  const filled = isIdle ? 0 : Math.round((progressPercent / 100) * BAR_CELLS);
+  const intervalLabel =
+    pollingInterval < 60 ? `${pollingInterval} с` : `${pollingInterval / 60} мин`;
 
   return (
-    <header className="p-5 lg:p-6 space-y-6">
-      {/* Wordmark */}
-      <div>
-        <div className="label flex items-center gap-2">
-          <span
-            className={`size-2 bg-accent ${isGlobalTracking ? "animate-pulse" : "opacity-40"}`}
-          />
-          LoL · live watch
+    <header className="p-4 lg:p-6 space-y-4 lg:space-y-6">
+      {/* Wordmark and poll clock: side by side on phones, stacked in the rail */}
+      <div className="flex items-start justify-between gap-4 lg:block lg:space-y-6">
+        <div>
+          <div className="label flex items-center gap-2">
+            <span
+              className={`size-2 bg-accent ${isIdle ? "opacity-40" : "animate-pulse"}`}
+            />
+            {gameLabel} · live watch
+          </div>
+          <div className="font-display text-3xl lg:text-4xl mt-2 leading-none">
+            Spectator
+          </div>
         </div>
-        <div className="font-display text-4xl mt-2 leading-none">Spectator</div>
-      </div>
 
-      {/* Poll clock */}
-      <div>
-        <div className="label">Следующая проверка</div>
-        <div
-          className="font-mono text-4xl tabular-nums mt-1.5"
-          role="timer"
-          aria-label="Время до следующей проверки"
-        >
-          {isRefreshingAll ? "··:··" : formatClock(secondsUntilNextCheck)}
-        </div>
-        <div
-          className="font-mono text-xs text-accent-ink mt-2 select-none whitespace-nowrap overflow-hidden"
-          aria-hidden="true"
-        >
-          [{"█".repeat(filled)}
-          <span className="text-line-strong">
-            {"░".repeat(BAR_CELLS - filled)}
-          </span>
-          ]
-        </div>
-        <div className="font-mono text-[11px] text-ink-2 mt-2">
-          {isRefreshingAll
-            ? "Опрос игроков…"
-            : isGlobalTracking
-              ? `Автоопрос каждые ${pollingInterval} с`
-              : "Автоопрос на паузе"}
+        {/* Poll clock */}
+        <div className="text-right lg:text-left">
+          <div className="label">Следующая проверка</div>
+          <div
+            className={`font-mono text-3xl lg:text-4xl tabular-nums mt-1.5 ${isIdle ? "text-ink-2" : "text-ink"}`}
+            role="timer"
+            aria-label="Время до следующей проверки"
+          >
+            {isIdle
+              ? "--:--"
+              : isRefreshingAll
+                ? "··:··"
+                : formatClock(secondsUntilNextCheck)}
+          </div>
+          <div
+            className="hidden lg:block font-mono text-xs text-accent-ink mt-2 select-none whitespace-nowrap overflow-hidden"
+            aria-hidden="true"
+          >
+            [{"█".repeat(filled)}
+            <span className="text-line-strong">
+              {"░".repeat(BAR_CELLS - filled)}
+            </span>
+            ]
+          </div>
+          {/* On phones only the idle reason is worth the space */}
+          <div
+            className={`${isIdle ? "block" : "hidden lg:block"} font-mono text-[11px] mt-1 lg:mt-2 ${isIdle ? "text-warn" : "text-ink-2"}`}
+          >
+            {isIdle
+              ? idleReason
+              : isRefreshingAll
+                ? "опрос игроков…"
+                : `автоопрос каждые ${intervalLabel}`}
+          </div>
         </div>
       </div>
 
       {/* Controls */}
-      <nav aria-label="Управление" className="grid gap-1.5">
+      <nav aria-label="Управление" className="grid grid-cols-2 gap-1.5 lg:grid-cols-1">
         <CommandRow
           icon={RotateCw}
           label="Проверить всех"
           onClick={refreshAllPlayers}
-          disabled={isRefreshingAll}
+          disabled={isRefreshingAll || !canCheckNow}
           title="Проверить статус всех игроков сейчас"
         />
         <CommandRow

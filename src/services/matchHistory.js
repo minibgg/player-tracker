@@ -1,7 +1,6 @@
 // Match History Service using Riot Match-V5 and Data Dragon item icons
 import { getRegionById, getRegionalHost } from "../data/regions";
-import { buildProxiedUrl, fetchPuuidByRiotId } from "./riotApi";
-import { getChampionByKey } from "./ddragon";
+import { buildProxiedUrl } from "./riotApi";
 
 const MATCH_CACHE_PREFIX = "lol_match_cache_";
 
@@ -206,6 +205,15 @@ export const fetchMatchHistory = async ({
     return { matches: mock, isMock: true };
   }
 
+  // Match-V5 is keyed by PUUID; without it there is nothing to ask for
+  if (!puuid) {
+    return {
+      matches: [],
+      isMock: false,
+      error: "Не удалось определить аккаунт игрока.",
+    };
+  }
+
   const region = getRegionById(regionId);
   const regionalHost = getRegionalHost(region.regionalRoute);
 
@@ -232,7 +240,7 @@ export const fetchMatchHistory = async ({
         idsRes.status === 429
           ? `Превышен лимит запросов Riot API.${retryAfter ? ` Повторите через ${retryAfter}с.` : ""}`
           : idsRes.status === 401 || idsRes.status === 403
-            ? "Riot API Key недействителен или истёк."
+            ? "API-ключ Riot недействителен или истёк."
             : `Не удалось загрузить список матчей: HTTP ${idsRes.status}`,
       );
     }
@@ -295,6 +303,7 @@ export const fetchMatchHistory = async ({
       const enemies = [];
       info.participants?.forEach((p) => {
         const itemObj = {
+          puuid: p.puuid,
           championId: p.championId,
           riotId: p.riotIdGameName
             ? `${p.riotIdGameName}#${p.riotIdTagline || ""}`

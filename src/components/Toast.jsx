@@ -33,7 +33,9 @@ const ToastItem = ({ toast, onDismiss }) => {
   // Keep the latest onDismiss in a ref so parent re-renders (e.g. polling
   // updates) don't recreate the callback and restart the timer forever.
   const onDismissRef = useRef(onDismiss);
-  onDismissRef.current = onDismiss;
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  });
 
   const [leaving, setLeaving] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -87,6 +89,18 @@ const ToastItem = ({ toast, onDismiss }) => {
           {toast.count > 1 ? ` · ×${toast.count}` : ""}
         </div>
         <div className="text-sm text-ink mt-1 break-words">{toast.message}</div>
+        {toast.action && (
+          <button
+            type="button"
+            onClick={() => {
+              toast.action.onClick();
+              setLeaving(true);
+            }}
+            className="mt-2 font-mono text-xs text-accent-ink underline decoration-line-strong underline-offset-4 hover:decoration-accent"
+          >
+            {toast.action.label}
+          </button>
+        )}
       </div>
       <button
         type="button"
