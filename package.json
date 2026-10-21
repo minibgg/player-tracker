@@ -8,7 +8,11 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview --port 5174 --strictPort",
-    "test": "vitest run"
+    "test": "vitest run",
+    "tracker": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-tracker.ps1",
+    "tracker:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-tracker.ps1",
+    "autostart:on": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-autostart.ps1",
+    "autostart:off": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-autostart.ps1 -Remove"
   },
   "dependencies": {
     "clsx": "^2.1.1",

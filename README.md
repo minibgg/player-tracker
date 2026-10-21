@@ -72,6 +72,19 @@ npm run dev
 
 Open [http://localhost:5174/](http://localhost:5174/) in your web browser.
 
+### Start with Windows (no terminal)
+
+```bash
+npm run autostart:on    # once: start the tracker at every sign-in
+npm run autostart:off   # undo
+```
+
+At sign-in a hidden PowerShell builds the app, serves it on [http://localhost:5174/](http://localhost:5174/) (`vite preview`, Riot proxy included) and opens it in its own Chrome app window (or the default browser). The polling runs in that window, so keep it open; minimized is fine. Logs go to `logs/tracker.log`.
+
+- `npm run tracker` starts the same thing by hand.
+- `npm run tracker:stop` stops the background server, e.g. to free port 5174 for `npm run dev`.
+- In a normal Chrome tab, add `localhost:5174` to *Settings → Performance → Always keep these sites active*, or Memory Saver may put the tab to sleep.
+
 ### 3. Run the Tests
 
 ```bash
