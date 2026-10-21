@@ -1,12 +1,22 @@
 // How the Apex tracker reacts to a fresh snapshot of a player: going online,
 // a match starting or ending, and the result of a finished match.
 import { startSession, updateSession } from "./activity";
-import { getMatchResult, isSameMatch, formatApexResult } from "./apexMatch";
+import {
+  getMatchResult,
+  isSameMatch,
+  isUnseen,
+  formatApexResult,
+} from "./apexMatch";
+import { isRanked } from "../data/apexRanks";
 
 // The API usually counts a match within a poll or two of its end
 export const RESULT_WAIT_MS = 5 * 60 * 1000;
+// A longer gap between polls (tracker closed, computer asleep) may hide
+// whole matches
+const STALE_GAP_MS = 15 * 60 * 1000;
 const HISTORY_LIMIT = 20;
-const MATCH_LOG_LIMIT = 20;
+const MATCH_LOG_LIMIT = 100;
+const RP_LOG_LIMIT = 300;
 
 const pushHistory = (history, entry) =>
   [entry, ...history].slice(0, HISTORY_LIMIT);
@@ -32,20 +42,42 @@ const baselineOf = (p) => ({
   legends: p.legends,
 });
 
-// The API's "in this state since", when it is usable
-const exactStartOf = (snap, now) =>
-  snap.stateSince && snap.stateSince <= now ? snap.stateSince : null;
+// The API's "in this state since" is the real start of the state for some
+// players and just the time of the request for others. A value well in the
+// past can't be the request time; two polls agreeing on it prove it's real.
+const PAST_SINCE_MS = 30 * 1000;
+const SINCE_TOLERANCE_MS = 5 * 1000;
+const MAX_MATCH_MS = 2 * 60 * 60 * 1000;
+
+const pastSinceOf = (snap, now) =>
+  snap.stateSince &&
+  snap.stateSince < now - PAST_SINCE_MS &&
+  snap.stateSince > now - MAX_MATCH_MS
+    ? snap.stateSince
+    : null;
 
 const newMatch = (snap, now) => {
-  const exact = exactStartOf(snap, now);
-  const start = exact ?? now;
+  const start = pastSinceOf(snap, now) ?? now;
   return {
     matchKey: start,
     // Read by useGameClock for the live stopwatch
     gameStartTime: start,
-    exactStart: exact !== null,
+    since: snap.stateSince,
+    sinceReliable: false,
     legend: snap.legend,
   };
+};
+
+// RP over time, oldest first: a point whenever the score moves
+const pushRp = (rpLog = [], rank, now) => {
+  if (!isRanked(rank)) return rpLog;
+  const last = rpLog[rpLog.length - 1];
+  if (last && last.score === rank.score && last.season === rank.season) {
+    return rpLog;
+  }
+  return [...rpLog, { at: now, score: rank.score, season: rank.season }].slice(
+    -RP_LOG_LIMIT,
+  );
 };
 
 const startMatchSession = (sessions, game, now) =>
@@ -80,6 +112,7 @@ export const createApexPlayer = (
     pendingResult: null,
     lastMatchResult: null,
     matchLog: [],
+    rpLog: pushRp([], snap.rank, now),
     lastChecked: now,
     sessions: currentGame ? startMatchSession([], currentGame, now) : [],
     statusHistory: [
@@ -105,28 +138,36 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
 
   const wasInGame = p.status === "IN_GAME";
   const isNowInGame = snap.presence === "IN_GAME";
-  const exactStart = exactStartOf(snap, now);
-  // Finished one match and started the next between two polls
+  // Finished one match and started the next between two polls: account XP
+  // only moves after a match (unless it belongs to a result still waiting),
+  // and a trusted "since" only moves when the state starts over
+  const xpMoved =
+    p.xpPercent !== undefined &&
+    (snap.level !== p.level || snap.xpPercent !== p.xpPercent);
+  const sinceJumped =
+    Boolean(currentGame?.sinceReliable && snap.stateSince) &&
+    snap.stateSince > currentGame.since &&
+    !isSameMatch(currentGame.since, snap.stateSince);
   const switchedGame =
-    wasInGame &&
-    isNowInGame &&
-    Boolean(currentGame?.exactStart && exactStart) &&
-    !isSameMatch(currentGame.matchKey, exactStart);
+    wasInGame && isNowInGame && ((xpMoved && !pendingResult) || sinceJumped);
   const gameEnded = (wasInGame && !isNowInGame) || switchedGame;
 
+  // Unseen matches are logged but never alert: they're old news
   const finishPending = (result) => {
     history = pushHistory(history, {
       timestamp: now,
       status: snap.presence,
       message: `Итог: ${formatApexResult(result)}`,
     });
-    if (result.win !== null) {
+    if (result.win !== null && !isUnseen(result)) {
       sessions = updateSession(sessions, result.matchKey, { win: result.win });
     }
     lastMatchResult = result;
     matchLog = [result, ...matchLog].slice(0, MATCH_LOG_LIMIT);
     pendingResult = null;
-    if (result.counted) events.push({ type: "MATCH_RESULT", player: p, result });
+    if (result.counted && !isUnseen(result)) {
+      events.push({ type: "MATCH_RESULT", player: p, result });
+    }
   };
 
   // A result still waiting when the next match ends: measure it against the
@@ -157,9 +198,11 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
       gameStartTime: p.lastChecked || now,
       legend: p.legend,
     };
-    // Back in the lobby since = when the match ended for the player
-    const leftAt = switchedGame ? exactStart : isNowInGame ? null : exactStart;
-    const endedAt = leftAt && leftAt > game.gameStartTime ? leftAt : now;
+    // Back in the lobby since (or the next match since) = when the match
+    // ended for the player, if the API's value fits
+    const leftAt = snap.stateSince;
+    const endedAt =
+      leftAt && leftAt > game.gameStartTime && leftAt <= now ? leftAt : now;
     history = pushHistory(history, {
       timestamp: now,
       status: snap.presence,
@@ -170,6 +213,10 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
       legend: game.legend,
     });
     pendingResult = {
+      // Polls too far apart: later matches may be mixed into this result
+      ...(p.lastChecked && now - p.lastChecked > STALE_GAP_MS
+        ? { kind: "unseen" }
+        : {}),
       matchKey: game.matchKey,
       legend: game.legend,
       startedAt: game.gameStartTime,
@@ -190,9 +237,38 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
     }
   }
 
+  // Matches the tracker never saw (it was closed, or a short one fit between
+  // two polls) still move XP and RP
+  let loggedUnseen = false;
+  if (
+    !wasInGame &&
+    !p.pendingResult &&
+    p.lastChecked &&
+    p.xpPercent !== undefined
+  ) {
+    const result = getMatchResult(
+      {
+        kind: "unseen",
+        matchKey: now,
+        legend: null,
+        startedAt: p.lastChecked,
+        endedAt: now,
+        baseline: baselineOf(p),
+      },
+      snap,
+    );
+    if (result.counted) {
+      finishPending(result);
+      loggedUnseen = true;
+    }
+  }
+
   if ((!wasInGame && isNowInGame) || switchedGame) {
     currentGame = newMatch(snap, now);
-    matchBaseline = { rank: (!wasInGame && p.rank) || snap.rank };
+    // RP from before this match, unless an unseen one moved it since
+    matchBaseline = {
+      rank: (!wasInGame && !loggedUnseen && p.rank) || snap.rank,
+    };
     history = pushHistory(history, {
       timestamp: now,
       status: "IN_GAME",
@@ -200,11 +276,28 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
     });
     sessions = startMatchSession(sessions, currentGame, now);
     events.push({ type: "GAME_START", player: p, legend: snap.legend });
+  } else if (isNowInGame && currentGame) {
+    // Two polls agreeing on "since" make it the real start of the match
+    const confirmed =
+      !currentGame.sinceReliable &&
+      Boolean(snap.stateSince && currentGame.since) &&
+      Math.abs(snap.stateSince - currentGame.since) < SINCE_TOLERANCE_MS &&
+      snap.stateSince <= now;
+    if (confirmed) {
+      sessions = updateSession(sessions, currentGame.matchKey, {
+        start: snap.stateSince,
+      });
+    }
+    currentGame = {
+      ...currentGame,
+      // The legend is picked once the match has started
+      legend: snap.legend || currentGame.legend,
+      since: snap.stateSince,
+      sinceReliable: currentGame.sinceReliable || confirmed,
+      gameStartTime: confirmed ? snap.stateSince : currentGame.gameStartTime,
+    };
   } else if (isNowInGame) {
-    // The legend is picked once the match has started
-    currentGame = currentGame
-      ? { ...currentGame, legend: snap.legend || currentGame.legend }
-      : newMatch(snap, now);
+    currentGame = newMatch(snap, now);
   }
 
   return {
@@ -216,6 +309,7 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
       pendingResult,
       lastMatchResult,
       matchLog,
+      rpLog: pushRp(p.rpLog, snap.rank, now),
       statusHistory: history,
       sessions,
       lastChecked: now,

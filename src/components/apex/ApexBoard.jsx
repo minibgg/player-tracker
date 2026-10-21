@@ -6,6 +6,7 @@ import { ApexAddPlayerBar } from "./ApexAddPlayerBar";
 import { ApexPlayerCard } from "./ApexPlayerCard";
 import { ApexProfileModal } from "./ApexProfileModal";
 import { ApexMapRotation } from "./ApexMapRotation";
+import { ApexLeaderboard } from "./ApexLeaderboard";
 
 /**
  * The Apex Legends tab: key warning, map rotation, add bar and the list.
@@ -123,8 +124,16 @@ export const ApexBoard = ({
         )}
       </section>
 
+      <Reveal>
+        <ApexLeaderboard
+          watchlist={watchlist}
+          onOpenProfile={(p) => setProfileId(p.id)}
+        />
+      </Reveal>
+
       <ApexProfileModal
         player={profilePlayer}
+        apiKey={isKeyRejected ? "" : apiKey}
         onClose={() => setProfileId(null)}
         onRefresh={onCheckPlayer}
         isChecking={profilePlayer ? checkingPlayerIds.has(profilePlayer.id) : false}

@@ -105,6 +105,52 @@ const num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+// Platform names in profile links of apexlegendsstatus.com and tracker.gg
+const PLATFORM_SLUGS = {
+  pc: "PC",
+  origin: "PC",
+  ps4: "PS4",
+  psn: "PS4",
+  x1: "X1",
+  xbl: "X1",
+  switch: "SWITCH",
+};
+
+const decodeSegment = (segment) => {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+};
+
+/**
+ * What was typed into the add bar: a name, a UID, or a profile link copied
+ * from apexlegendsstatus.com (…/profile/uid/PC/1006629268243 or
+ * …/profile/PC/Name) or apex.tracker.gg (…/profile/origin/Name/overview).
+ * Returns { uid } or { name }, plus the platform a link names (else null).
+ */
+export const parseApexPlayerInput = (raw) => {
+  const input = String(raw || "").trim();
+  const platformOf = (slug) => PLATFORM_SLUGS[slug.toLowerCase()] ?? null;
+
+  const byUid = input.match(
+    /apexlegendsstatus\.com\/profile\/uid\/([a-z0-9]+)\/(\d+)/i,
+  );
+  if (byUid) return { uid: byUid[2], platform: platformOf(byUid[1]) };
+
+  const byName =
+    input.match(/apexlegendsstatus\.com\/profile\/([a-z0-9]+)\/([^/?#]+)/i) ||
+    input.match(/tracker\.gg\/apex\/profile\/([a-z0-9]+)\/([^/?#]+)/i);
+  if (byName) {
+    return { name: decodeSegment(byName[2]), platform: platformOf(byName[1]) };
+  }
+
+  // A bare number is a UID (the only way to find Switch players)
+  if (/^\d{6,}$/.test(input)) return { uid: input, platform: null };
+  return { name: input, platform: null };
+};
+
 // "Mad Maggie", "MadMaggie" and "madmaggie" are the same legend
 export const legendKey = (name) =>
   String(name || "")
@@ -241,4 +287,24 @@ export const testApexApiKey = async ({ apiKey }) => {
   } catch (err) {
     return { success: false, error: err.message, status: err.status };
   }
+};
+
+/**
+ * RP needed for Apex Predator on each platform: { PC: { rp, isFull,
+ * masters }, … }. isFull is false while fewer than 750 players qualify; the
+ * cut is then the Master floor. masters counts Master and Predator players.
+ * GET /predator
+ */
+export const fetchPredatorCut = async ({ apiKey }) => {
+  const data = await fetchApexEndpoint("/predator", {}, apiKey);
+  return Object.fromEntries(
+    Object.entries(data?.RP || {}).map(([platform, entry]) => [
+      platform,
+      {
+        rp: num(entry?.val),
+        isFull: num(entry?.foundRank) > 0,
+        masters: num(entry?.totalMastersAndPreds),
+      },
+    ]),
+  );
 };

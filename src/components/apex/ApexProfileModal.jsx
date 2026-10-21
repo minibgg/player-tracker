@@ -1,6 +1,9 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { X, RotateCw, ShieldAlert } from "lucide-react";
 import { LegendIcon } from "./LegendIcon";
+import { RpChart } from "./RpChart";
+import { RankProgress } from "./RankProgress";
+import { usePredatorCut } from "../../hooks/usePredatorCut";
 import { getApexPlatform, PRESENCE } from "../../data/apexPlatforms";
 import {
   formatApexTier,
@@ -8,7 +11,13 @@ import {
   isRanked,
 } from "../../data/apexRanks";
 import { legendKey } from "../../services/apexApi";
-import { getApexOutcomeLabel } from "../../services/apexMatch";
+import {
+  getApexOutcomeLabel,
+  getApexHistoryStats,
+  isUnseen,
+  plural,
+} from "../../services/apexMatch";
+import { startOfDay } from "../../services/activity";
 import { formatTimestamp } from "../../services/timeFormat";
 
 // Hooks live in the inner component so they are never called conditionally
@@ -18,6 +27,23 @@ export const ApexProfileModal = (props) => {
 };
 
 const formatValue = (n) => Number(n).toLocaleString("ru-RU");
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const PERIODS = [
+  { id: "today", label: "сегодня", from: (now) => startOfDay(now) },
+  { id: "week", label: "7 дней", from: (now) => startOfDay(now) - 6 * DAY_MS },
+  { id: "all", label: "вся история", from: () => 0 },
+];
+
+// "4 матча · 1 победа · 15 убийств"
+const describeStats = ({ matches, wins, kills }) =>
+  [
+    `${matches} ${plural(matches, "матч", "матча", "матчей")}`,
+    wins > 0 && `${wins} ${plural(wins, "победа", "победы", "побед")}`,
+    kills > 0 && `${kills} ${plural(kills, "убийство", "убийства", "убийств")}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 const Stat = ({ label, children, detail }) => (
   <div className="min-w-0">
@@ -29,9 +55,19 @@ const Stat = ({ label, children, detail }) => (
   </div>
 );
 
-const ApexProfileContent = ({ player, onClose, onRefresh, isChecking }) => {
+const ApexProfileContent = ({
+  player,
+  apiKey,
+  onClose,
+  onRefresh,
+  isChecking,
+}) => {
   const platform = getApexPlatform(player.platform);
+  const predatorCut = usePredatorCut(apiKey);
+  const platformCut = predatorCut?.[platform.id];
   const presence = PRESENCE[player.status] || PRESENCE.OFFLINE;
+  // Fixed while open; every poll re-renders with a fresh player anyway
+  const [now] = useState(() => Date.now());
 
   // Escape closes the modal
   useEffect(() => {
@@ -138,6 +174,11 @@ const ApexProfileContent = ({ player, onClose, onRefresh, isChecking }) => {
                   {isRanked(player.rank) ? formatApexTier(player.rank) : "без ранга"}
                 </span>
               </div>
+              <RankProgress
+                rank={player.rank}
+                platform={platform.id}
+                predatorCut={predatorCut}
+              />
             </Stat>
 
             <Stat label="уровень" detail={`${player.xpPercent || 0}% до следующего`}>
@@ -171,6 +212,128 @@ const ApexProfileContent = ({ player, onClose, onRefresh, isChecking }) => {
               </div>
             </Stat>
           </div>
+
+          {platformCut && (
+            <p className="-mt-4 font-mono text-[11px] text-ink-2">
+              Predator на {platform.name}:{" "}
+              {platformCut.isFull
+                ? `от ${formatValue(platformCut.rp)} RP`
+                : "любой игрок Master (их меньше 750)"}{" "}
+              · в Master и Predator {formatValue(platformCut.masters)} игроков
+            </p>
+          )}
+
+          <section aria-label="История матчей" className="space-y-5">
+            <div className="label pb-2 border-b border-line-strong">
+              история матчей
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              {PERIODS.map((period) => {
+                const stats = getApexHistoryStats(
+                  matchLog,
+                  period.from(now),
+                  Infinity,
+                );
+                return (
+                  <Stat
+                    key={period.id}
+                    label={period.label}
+                    detail={describeStats(stats)}
+                  >
+                    <span className="font-display text-lg tabular-nums">
+                      {stats.rp ? formatRpChange(stats.rp) : "0 RP"}
+                    </span>
+                  </Stat>
+                );
+              })}
+            </div>
+
+            <div>
+              <div className="label mb-2">
+                RP за сезон
+                {isRanked(player.rank) && player.rank.season
+                  ? ` · ${player.rank.season}`
+                  : ""}
+              </div>
+              <RpChart rpLog={player.rpLog} now={now} />
+            </div>
+
+            {matchLog.length === 0 ? (
+              <p className="text-xs text-ink-2">
+                Пока ни одного матча. Итог появится после первого матча, который
+                застанет открытый трекер.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full font-mono text-xs">
+                  <thead>
+                    <tr className="text-left text-ink-2">
+                      <th className="py-2 pr-3 font-normal">когда</th>
+                      <th className="py-2 pr-3 font-normal">легенда</th>
+                      <th className="py-2 pr-3 font-normal">итог</th>
+                      <th className="py-2 pr-3 font-normal text-right">убийства</th>
+                      <th className="py-2 pr-3 font-normal text-right">урон</th>
+                      <th className="py-2 pr-3 font-normal text-right">RP</th>
+                      <th className="py-2 font-normal text-right">мин</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matchLog.map((m) => (
+                      <tr
+                        key={`${m.kind}-${m.matchKey}`}
+                        className="border-t border-line align-top"
+                      >
+                        <td className="py-2 pr-3 text-ink-2 whitespace-nowrap">
+                          {formatTimestamp(m.endedAt)}
+                          {isUnseen(m) && (
+                            <div className="text-[10px]">
+                              с {formatTimestamp(m.startedAt)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-ink whitespace-nowrap">
+                          {m.legend || "—"}
+                        </td>
+                        <td
+                          className={`py-2 pr-3 uppercase whitespace-nowrap ${
+                            isUnseen(m)
+                              ? "text-ink-2"
+                              : m.win
+                                ? "text-success"
+                                : m.counted
+                                  ? "text-ink"
+                                  : "text-ink-2"
+                          }`}
+                        >
+                          {getApexOutcomeLabel(m)}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {m.kills ?? "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {m.damage != null ? formatValue(m.damage) : "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums whitespace-nowrap text-ink">
+                          {m.rpChange != null ? formatRpChange(m.rpChange) : "—"}
+                          {m.tierChange && (
+                            <div className="text-[10px] text-ink-2">
+                              {m.tierChange}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {isUnseen(m)
+                            ? "—"
+                            : Math.max(1, Math.round(m.duration / 60))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
 
           <section aria-label="Трекеры на баннерах">
             <div className="label pb-2 border-b border-line-strong">
@@ -212,66 +375,9 @@ const ApexProfileContent = ({ player, onClose, onRefresh, isChecking }) => {
             )}
           </section>
 
-          <section aria-label="Матчи, замеченные трекером">
-            <div className="label pb-2 border-b border-line-strong">
-              матчи, замеченные трекером
-            </div>
-            {matchLog.length === 0 ? (
-              <p className="py-3 text-xs text-ink-2">
-                Пока ни одного. Итог появится после первого матча, который
-                застанет открытый трекер.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full font-mono text-xs">
-                  <thead>
-                    <tr className="text-left text-ink-2">
-                      <th className="py-2 pr-3 font-normal">когда</th>
-                      <th className="py-2 pr-3 font-normal">легенда</th>
-                      <th className="py-2 pr-3 font-normal">итог</th>
-                      <th className="py-2 pr-3 font-normal text-right">убийства</th>
-                      <th className="py-2 pr-3 font-normal text-right">урон</th>
-                      <th className="py-2 pr-3 font-normal text-right">RP</th>
-                      <th className="py-2 font-normal text-right">мин</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {matchLog.map((m) => (
-                      <tr key={m.matchKey} className="border-t border-line">
-                        <td className="py-2 pr-3 text-ink-2 whitespace-nowrap">
-                          {formatTimestamp(m.endedAt)}
-                        </td>
-                        <td className="py-2 pr-3 text-ink whitespace-nowrap">
-                          {m.legend || "—"}
-                        </td>
-                        <td
-                          className={`py-2 pr-3 uppercase whitespace-nowrap ${
-                            m.win ? "text-success" : m.counted ? "text-ink" : "text-ink-2"
-                          }`}
-                        >
-                          {getApexOutcomeLabel(m)}
-                        </td>
-                        <td className="py-2 pr-3 text-right tabular-nums">
-                          {m.kills ?? "—"}
-                        </td>
-                        <td className="py-2 pr-3 text-right tabular-nums">
-                          {m.damage != null ? formatValue(m.damage) : "—"}
-                        </td>
-                        <td className="py-2 pr-3 text-right tabular-nums whitespace-nowrap">
-                          {m.rpChange != null ? formatRpChange(m.rpChange) : "—"}
-                        </td>
-                        <td className="py-2 text-right tabular-nums">
-                          {Math.max(1, Math.round(m.duration / 60))}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
           <p className="text-xs text-ink-2 leading-relaxed">
+            История копится, пока трекер открыт; матчи, сыгранные без него,
+            попадают в неё строкой «вне наблюдения» с общим изменением RP.
             Убийства, урон и победы видны, только если игрок поставил эти
             трекеры на баннер легенды, с которой играл. RP меняется только в
             рейтинговых матчах. Данные:{" "}

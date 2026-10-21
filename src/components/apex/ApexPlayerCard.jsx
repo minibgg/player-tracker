@@ -18,13 +18,17 @@ import { getApexPlatform, PRESENCE } from "../../data/apexPlatforms";
 import {
   formatApexRank,
   formatRpChange,
+  formatScore,
+  getRankProgress,
   isRanked,
 } from "../../data/apexRanks";
 import {
   getApexOutcomeLabel,
+  getApexHistoryStats,
   formatKills,
   formatDamage,
 } from "../../services/apexMatch";
+import { startOfDay } from "../../services/activity";
 import {
   formatDuration,
   formatTimestamp,
@@ -85,6 +89,23 @@ export const ApexPlayerCard = ({
   const presence = PRESENCE[player.status] || PRESENCE.OFFLINE;
 
   const gameDurationSeconds = useGameClock(isInGame ? currentGame : null);
+
+  const progress = getRankProgress(player.rank);
+  const rankTitle = [
+    player.rank?.season,
+    progress && `до ${progress.next}: ${formatScore(progress.left)} RP`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  // RP won or lost on the day of the last check
+  const todayRp = player.lastChecked
+    ? getApexHistoryStats(
+        player.matchLog,
+        startOfDay(player.lastChecked),
+        Infinity,
+      ).rp
+    : 0;
 
   // Celebrate changes that happen while the page is open, not on every load
   const [mountMatchKey] = useState(() => currentGame?.matchKey ?? null);
@@ -166,11 +187,19 @@ export const ApexPlayerCard = ({
           </div>
           <div className="label mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
             {isRanked(player.rank) ? (
-              <span className="text-ink" title={player.rank.season || ""}>
+              <span className="text-ink" title={rankTitle}>
                 {formatApexRank(player.rank)}
               </span>
             ) : (
               player.rank && <span>без ранга</span>
+            )}
+            {todayRp !== 0 && (
+              <span
+                className={todayRp > 0 ? "text-success" : "text-danger"}
+                title="Изменение RP за сегодня"
+              >
+                сегодня {formatRpChange(todayRp)}
+              </span>
             )}
             {player.isBanned && <span className="text-danger">бан</span>}
             {isPinned && <span className="text-accent-ink">закреплён</span>}

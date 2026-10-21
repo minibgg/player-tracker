@@ -98,6 +98,7 @@ describe("Apex players in the backup", () => {
     currentGame: { matchKey: 1 },
     legends: { wraith: { name: "Wraith", trackers: [] } },
     sessions: [{ matchId: 1, start: 1000 }],
+    rpLog: [{ at: 1000, score: 6400, season: "s1" }, { at: "bad" }],
     ...overrides,
   });
 
@@ -113,6 +114,7 @@ describe("Apex players in the backup", () => {
       currentGame: null,
     });
     expect(restored.sessions).toHaveLength(1);
+    expect(restored.rpLog).toEqual([{ at: 1000, score: 6400, season: "s1" }]);
     // League players parse as before
     expect(parseWatchlistBackup(text)).toEqual([]);
   });

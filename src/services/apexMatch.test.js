@@ -4,6 +4,7 @@ import {
   getTrackerKind,
   formatApexResult,
   isSameMatch,
+  getApexHistoryStats,
 } from "./apexMatch";
 
 const gold = (score, div = 2) => ({ name: "Gold", div, score, season: "s1" });
@@ -140,5 +141,35 @@ describe("isSameMatch", () => {
   it("tolerates a jittery start time", () => {
     expect(isSameMatch(1_000_000, 1_030_000)).toBe(true);
     expect(isSameMatch(1_000_000, 1_000_000 + 5 * 60_000)).toBe(false);
+  });
+});
+
+describe("getApexHistoryStats", () => {
+  const m = (endedAt, overrides = {}) => ({
+    kind: "match",
+    endedAt,
+    counted: true,
+    win: null,
+    kills: null,
+    damage: null,
+    rpChange: null,
+    ...overrides,
+  });
+
+  it("sums the matches of the period and every RP change in it", () => {
+    const log = [
+      m(500, { win: true, kills: 5, damage: 1200, rpChange: 60 }),
+      m(400, { win: false, kills: 1, rpChange: -20 }),
+      m(300, { kind: "unseen", rpChange: -35 }),
+      m(100, { kills: 9, rpChange: 99 }),
+    ];
+    expect(getApexHistoryStats(log, 200, 1000)).toEqual({
+      matches: 2,
+      wins: 1,
+      kills: 6,
+      damage: 1200,
+      rp: 5,
+    });
+    expect(getApexHistoryStats([], 0, 1000).matches).toBe(0);
   });
 });

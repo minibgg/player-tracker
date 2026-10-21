@@ -1,12 +1,13 @@
 import React, { useState } from "react";
 import { Loader2, CornerDownLeft } from "lucide-react";
 import { APEX_PLATFORMS, getApexPlatform } from "../../data/apexPlatforms";
+import { parseApexPlayerInput } from "../../services/apexApi";
 
 const PLACEHOLDERS = {
-  PC: "ник EA-аккаунта (и для Steam) или UID",
-  PS4: "PSN ID или UID",
-  X1: "Gamertag или UID",
-  SWITCH: "UID игрока (число)",
+  PC: "ник EA-аккаунта, UID или ссылка на профиль",
+  PS4: "PSN ID, UID или ссылка на профиль",
+  X1: "Gamertag, UID или ссылка на профиль",
+  SWITCH: "UID игрока или ссылка на профиль",
 };
 
 // The Apex version of the command line: platform, player name, enter
@@ -28,10 +29,11 @@ export const ApexAddPlayerBar = ({
 
     const trimmed = nameInput.trim();
     if (!trimmed) {
-      setInputError(`Введите ${PLACEHOLDERS[platform.id].split(" (")[0]}.`);
+      setInputError("Введите ник, UID или ссылку на профиль.");
       return;
     }
-    if (!platform.byName && !/^\d+$/.test(trimmed)) {
+    const parsed = parseApexPlayerInput(trimmed);
+    if (!getApexPlatform(parsed.platform || platform.id).byName && !parsed.uid) {
       setInputError(`${platform.name}: поиск только по UID, это число.`);
       return;
     }
@@ -127,8 +129,16 @@ export const ApexAddPlayerBar = ({
       )}
 
       <div className="mt-3 font-mono text-[11px] text-ink-2">
-        PC: ник EA-аккаунта, даже если игра запущена через Steam · мобильная
-        версия не поддерживается
+        PC: ник EA-аккаунта, даже если игра запущена через Steam · если ник не
+        находится, вставьте ссылку на профиль с{" "}
+        <a
+          href="https://apexlegendsstatus.com/"
+          target="_blank"
+          rel="noreferrer"
+          className="underline decoration-line-strong underline-offset-4 hover:text-accent-ink hover:decoration-accent transition-colors"
+        >
+          apexlegendsstatus.com
+        </a>
       </div>
     </section>
   );

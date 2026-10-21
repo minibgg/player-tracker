@@ -65,7 +65,7 @@ describe("applyApexSnapshot", () => {
     expect(r.player.currentGame.gameStartTime).toBe(T0 + MIN);
 
     // Legend picked after the match started; still the same match
-    r = step(r.player, inMatch(T0 + MIN + 2000, { legend: "Bangalore" }), T0 + 3 * MIN);
+    r = step(r.player, inMatch(T0 + MIN, { legend: "Bangalore" }), T0 + 3 * MIN);
     expect(r.events).toEqual([]);
     expect(r.player.currentGame.legend).toBe("Bangalore");
 
@@ -119,9 +119,84 @@ describe("applyApexSnapshot", () => {
 
   it("notices a new match started between two polls", () => {
     let r = step(added(), inMatch(T0 + MIN), T0 + 2 * MIN);
-    r = step(r.player, inMatch(T0 + 20 * MIN, { xpPercent: 50 }), T0 + 21 * MIN);
+    // XP only moves after a match: the last one ended, this is a new one
+    r = step(r.player, inMatch(T0 + 5 * MIN, { xpPercent: 50 }), T0 + 6 * MIN);
     expect(r.events).toEqual(["GAME_END", "MATCH_RESULT", "GAME_START"]);
-    expect(r.player.currentGame.gameStartTime).toBe(T0 + 20 * MIN);
+    expect(r.player.currentGame.gameStartTime).toBe(T0 + 5 * MIN);
+    expect(r.player.sessions).toHaveLength(2);
+  });
+
+  it("logs matches it never saw, without alerts", () => {
+    // Lobby, then lobby again 3 hours later with RP and XP moved
+    let r = step(added(), snap(), T0 + MIN);
+    const later = snap({
+      xpPercent: 80,
+      rank: { name: "Gold", div: 2, score: 6350, season: "s1" },
+    });
+    r = step(r.player, later, T0 + 3 * 60 * MIN);
+    expect(r.events).toEqual([]);
+    expect(r.player.matchLog[0]).toMatchObject({
+      kind: "unseen",
+      rpChange: -50,
+      startedAt: T0 + MIN,
+    });
+    expect(r.player.statusHistory[0].message).toBe("Итог: Вне наблюдения · −50 RP");
+  });
+
+  it("marks a result unseen when the polls around it were far apart", () => {
+    let r = step(added(), inMatch(T0 + MIN), T0 + 2 * MIN);
+    r = step(r.player, snap({ xpPercent: 90 }), T0 + 2 * 60 * MIN);
+    expect(r.events).toEqual(["GAME_END"]);
+    expect(r.player.lastMatchResult.kind).toBe("unseen");
+  });
+
+  it("keeps a log of RP over time", () => {
+    const rank = (score) => ({ name: "Gold", div: 2, score, season: "s1" });
+    let r = step(added(), snap(), T0 + MIN);
+    r = step(r.player, snap(), T0 + 2 * MIN);
+    r = step(r.player, snap({ rank: rank(6450) }), T0 + 3 * MIN);
+    expect(r.player.rpLog).toEqual([
+      { at: T0, score: 6400, season: "s1" },
+      { at: T0 + 3 * MIN, score: 6450, season: "s1" },
+    ]);
+  });
+
+  it("ignores a since that is just the time of each request", () => {
+    // Some players get "since = now" on every poll; a 5-minute interval
+    // must not look like a new match each time
+    let r = step(added(), inMatch(T0 + 2 * MIN), T0 + 2 * MIN);
+    expect(r.player.currentGame.gameStartTime).toBe(T0 + 2 * MIN);
+    r = step(r.player, inMatch(T0 + 7 * MIN), T0 + 7 * MIN);
+    r = step(r.player, inMatch(T0 + 12 * MIN), T0 + 12 * MIN);
+    expect(r.events).toEqual([]);
+    expect(r.player.currentGame.gameStartTime).toBe(T0 + 2 * MIN);
+    expect(r.player.sessions).toHaveLength(1);
+  });
+
+  it("trusts a since two polls agree on, and corrects the clock with it", () => {
+    // 20 s old: could still be the request time, so not trusted yet
+    let r = step(added(), inMatch(T0 + 40_000), T0 + MIN);
+    expect(r.player.currentGame.gameStartTime).toBe(T0 + MIN);
+    r = step(r.player, inMatch(T0 + 40_000), T0 + 2 * MIN);
+    expect(r.player.currentGame.gameStartTime).toBe(T0 + 40_000);
+    expect(r.player.sessions[0].start).toBe(T0 + 40_000);
+
+    // A trusted since that jumps means a new match, even without XP news
+    r = step(r.player, inMatch(T0 + 25 * MIN), T0 + 26 * MIN);
+    expect(r.events).toEqual(["GAME_END", "GAME_START"]);
+    expect(r.player.sessions).toHaveLength(2);
+  });
+
+  it("leaves late XP of a waiting result to that result", () => {
+    let r = step(added(), inMatch(T0 + MIN), T0 + 2 * MIN);
+    r = step(r.player, snap({ stateSince: T0 + 10 * MIN }), T0 + 11 * MIN);
+    expect(r.player.pendingResult).not.toBeNull();
+    // Next match; the API counts the previous one only now
+    r = step(r.player, inMatch(T0 + 12 * MIN), T0 + 13 * MIN);
+    expect(r.events).toEqual(["GAME_START"]);
+    r = step(r.player, inMatch(T0 + 12 * MIN, { xpPercent: 70 }), T0 + 14 * MIN);
+    expect(r.events).toEqual(["MATCH_RESULT"]);
+    expect(r.player.status).toBe("IN_GAME");
     expect(r.player.sessions).toHaveLength(2);
   });
 

@@ -46,6 +46,7 @@ export const serializeWatchlist = (
         rank: p.rank || null,
         lastMatchResult: p.lastMatchResult || null,
         matchLog: p.matchLog || [],
+        rpLog: p.rpLog || [],
         statusHistory: p.statusHistory || [],
         sessions: p.sessions || [],
       })),
@@ -149,7 +150,14 @@ const toApexPlayer = (p) => ({
   lastChecked: null,
   rank: isObject(p.rank) ? p.rank : null,
   lastMatchResult: isObject(p.lastMatchResult) ? p.lastMatchResult : null,
-  matchLog: Array.isArray(p.matchLog) ? p.matchLog.filter(isObject).slice(0, 20) : [],
+  matchLog: Array.isArray(p.matchLog)
+    ? p.matchLog.filter(isObject).slice(0, 100)
+    : [],
+  rpLog: Array.isArray(p.rpLog)
+    ? p.rpLog
+        .filter((e) => isObject(e) && Number.isFinite(e.at) && Number.isFinite(e.score))
+        .slice(-300)
+    : [],
   statusHistory: Array.isArray(p.statusHistory)
     ? p.statusHistory.filter(isObject).slice(0, 20)
     : [],

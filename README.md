@@ -47,8 +47,10 @@ A modern, real-time client-side single-page application built with **React 19**,
   - A second tab next to League with its own watchlist and API key; both games are polled on the same clock whichever tab is open, and each tab shows how many of its players are in a match.
   - Online / in lobby / in match status, the selected legend and a live match stopwatch via the [Apex Legends Status API](https://apexlegendsapi.com/) (EA has no public API).
   - Rank and RP on every card. After a match: RP gained or lost (ranked), plus kills, damage and a win when the player shows those trackers on the legend's banner.
+  - Match history built by the tracker: RP per match, totals for today / 7 days, an RP chart for the season, and "unseen" entries for RP that moved while the tracker was closed.
+  - Progress to the next division (or to Apex Predator from Master, using the live Predator cut) and a leaderboard of the tracked players by RP gained.
   - Optional "came online" alert and a legend filter in the alert rules; current Battle Royale and ranked maps with a countdown.
-  - PC players are found by their EA account name (Steam players too), PlayStation / Xbox by PSN ID / Gamertag, anyone (including Switch) by UID.
+  - PC players are found by their EA account name (Steam players too), PlayStation / Xbox by PSN ID / Gamertag, anyone (including Switch) by UID or by a profile link from apexlegendsstatus.com.
 - **Status Change History**:
   - Expandable event log tracking when matches were entered, champion played, queue type, and match conclusions.
 

@@ -4,6 +4,7 @@ import {
   getPresence,
   toApexError,
   legendKey,
+  parseApexPlayerInput,
 } from "./apexApi";
 
 const bridge = (overrides = {}) => ({
@@ -140,5 +141,41 @@ describe("legendKey", () => {
     expect(legendKey("Mad Maggie")).toBe(legendKey("MadMaggie"));
     expect(legendKey("Alter")).toBe("alter");
     expect(legendKey(null)).toBe("");
+  });
+});
+
+describe("parseApexPlayerInput", () => {
+  it("takes names and bare UIDs as typed", () => {
+    expect(parseApexPlayerInput(" Leg1tt_2 ")).toEqual({ name: "Leg1tt_2", platform: null });
+    expect(parseApexPlayerInput("1006629268243")).toEqual({
+      uid: "1006629268243",
+      platform: null,
+    });
+    // Short numbers are names
+    expect(parseApexPlayerInput("12345")).toEqual({ name: "12345", platform: null });
+  });
+
+  it("reads the UID and platform from an apexlegendsstatus.com link", () => {
+    expect(
+      parseApexPlayerInput("https://apexlegendsstatus.com/profile/uid/PC/1006629268243"),
+    ).toEqual({ uid: "1006629268243", platform: "PC" });
+    expect(
+      parseApexPlayerInput("apexlegendsstatus.com/profile/uid/SWITCH/123456789?x=1"),
+    ).toEqual({ uid: "123456789", platform: "SWITCH" });
+    expect(
+      parseApexPlayerInput("https://apexlegendsstatus.com/profile/PS4/Some%20Name"),
+    ).toEqual({ name: "Some Name", platform: "PS4" });
+  });
+
+  it("reads the name and platform from a tracker.gg link", () => {
+    expect(
+      parseApexPlayerInput("https://apex.tracker.gg/apex/profile/origin/Leg1tt_2/overview"),
+    ).toEqual({ name: "Leg1tt_2", platform: "PC" });
+    expect(
+      parseApexPlayerInput("https://apex.tracker.gg/apex/profile/xbl/Some%20Tag"),
+    ).toEqual({ name: "Some Tag", platform: "X1" });
+    expect(
+      parseApexPlayerInput("https://apex.tracker.gg/apex/profile/psn/Name%E0%A4"),
+    ).toEqual({ name: "Name%E0%A4", platform: "PS4" });
   });
 });

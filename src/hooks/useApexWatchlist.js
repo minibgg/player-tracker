@@ -5,7 +5,7 @@ import {
   setStoredApexWatchlist,
 } from "../services/storage";
 import { getApexPlatform } from "../data/apexPlatforms";
-import { fetchApexPlayer } from "../services/apexApi";
+import { fetchApexPlayer, parseApexPlayerInput } from "../services/apexApi";
 import { rememberLegendAssets } from "../services/apexAssets";
 import { createApexPlayer } from "../services/apexTracking";
 import {
@@ -16,8 +16,9 @@ import {
 
 const getName = (p) => p.name;
 
-// A bare number is a UID (the only way to find Switch players)
-const UID_PATTERN = /^\d{6,}$/;
+// The service's site resolves names its API can't, and links to the UID
+const profileUrl = (platform, name) =>
+  `https://apexlegendsstatus.com/profile/${platform}/${encodeURIComponent(name)}`;
 
 /**
  * The Apex Legends watchlist (persisted to localStorage) and the actions on
@@ -34,11 +35,12 @@ export const useApexWatchlist = ({ apiKey, addToast }) => {
   const [isAddingPlayer, setIsAddingPlayer] = useState(false);
 
   const addPlayer = async ({ rawInput, platformId, isPinned = false }) => {
-    const platform = getApexPlatform(platformId);
-    const input = String(rawInput || "").trim();
-    const isUid = UID_PATTERN.test(input);
+    const { uid, name, platform: linkPlatform } = parseApexPlayerInput(rawInput);
+    // A pasted profile link knows its platform better than the select
+    const platform = getApexPlatform(linkPlatform || platformId);
+    const input = uid || name;
 
-    if (!platform.byName && !isUid) {
+    if (!platform.byName && !uid) {
       addToast(
         "error",
         `${platform.name}: игроков можно найти только по UID (число).`,
@@ -58,7 +60,7 @@ export const useApexWatchlist = ({ apiKey, addToast }) => {
     setIsAddingPlayer(true);
     try {
       const snap = await fetchApexPlayer({
-        ...(isUid ? { uid: input } : { name: input }),
+        ...(uid ? { uid } : { name }),
         platform: platform.id,
         apiKey,
       });
@@ -87,14 +89,28 @@ export const useApexWatchlist = ({ apiKey, addToast }) => {
       );
     } catch (err) {
       console.error("Failed to add Apex player:", err);
+      if (err.status === 404 && name) {
+        // The API's name search misses many accounts, renamed ones above all;
+        // a UID always works
+        addToast(
+          "error",
+          `API не нашёл ${name} на ${platform.name}: поиск по нику работает не для всех аккаунтов, особенно после смены ника. Откройте профиль на apexlegendsstatus.com, нажмите значок платформы рядом с ником и вставьте сюда ссылку из адресной строки: по ней игрок найдётся по UID.`,
+          "Ник не найден",
+          {
+            duration: 20000,
+            action: {
+              label: "открыть профиль",
+              onClick: () =>
+                window.open(profileUrl(platform.id, name), "_blank", "noopener"),
+            },
+          },
+        );
+        return;
+      }
       addToast(
         "error",
         err.status === 404
-          ? `Игрок ${input} не найден на ${platform.name}. ${
-              platform.id === "PC"
-                ? "Для PC нужен ник EA-аккаунта, даже если игра запущена через Steam."
-                : "Проверьте ник и платформу."
-            }`
+          ? `Игрок с UID ${uid} не найден на ${platform.name}.`
           : err.message || "Не удалось найти игрока.",
         "Ошибка поиска",
       );

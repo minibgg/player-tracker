@@ -38,12 +38,13 @@ const getTrackerChanges = (before = [], after = []) =>
     .filter((t) => t && t.delta > 0);
 
 /**
- * pending:  { matchKey, legend, startedAt, endedAt, baseline }
+ * pending:  { matchKey, legend, startedAt, endedAt, baseline, kind? }
  * baseline: { rank, level, xpPercent, legends } from before the match counted
  * snapshot: the latest parseBridgeResponse() result
  *
  * counted is false while the API still shows pre-match numbers (no XP,
- * tracker or RP change yet).
+ * tracker or RP change yet). kind "unseen" marks changes from matches the
+ * tracker didn't see (it was closed, or a match fit between two polls).
  */
 export const getMatchResult = (pending, snapshot) => {
   const { baseline = {} } = pending;
@@ -70,6 +71,7 @@ export const getMatchResult = (pending, snapshot) => {
   const wins = countedKind("wins");
 
   return {
+    kind: pending.kind || "match",
     matchKey: pending.matchKey,
     legend: pending.legend || null,
     startedAt: pending.startedAt,
@@ -88,7 +90,7 @@ export const getMatchResult = (pending, snapshot) => {
   };
 };
 
-const plural = (n, one, few, many) => {
+export const plural = (n, one, few, many) => {
   const mod10 = n % 10;
   const mod100 = n % 100;
   if (mod10 === 1 && mod100 !== 11) return one;
@@ -101,7 +103,10 @@ export const formatKills = (n) =>
 
 export const formatDamage = (n) => `${n.toLocaleString("ru-RU")} урона`;
 
+export const isUnseen = (result) => result.kind === "unseen";
+
 export const getApexOutcomeLabel = (result) => {
+  if (isUnseen(result)) return "Вне наблюдения";
   if (!result.counted) return "Без итога";
   if (result.win === true) return "Победа";
   if (result.win === false) return "Не топ-1";
@@ -114,9 +119,32 @@ export const formatApexResult = (result) => {
   if (result.legend) parts.push(result.legend);
   if (result.kills != null) parts.push(formatKills(result.kills));
   if (result.damage != null) parts.push(formatDamage(result.damage));
-  parts.push(`${Math.max(1, Math.round(result.duration / 60))} мин`);
+  // How long the tracker was away says nothing about the matches
+  if (!isUnseen(result)) {
+    parts.push(`${Math.max(1, Math.round(result.duration / 60))} мин`);
+  }
   if (result.rpChange != null) parts.push(formatRpChange(result.rpChange));
   if (result.tierChange) parts.push(result.tierChange);
+  if (isUnseen(result) && result.rpChange == null) parts.push("RP без изменений");
   if (!result.counted) parts.push("статистика не обновилась");
   return parts.join(" · ");
+};
+
+/**
+ * Totals of the match log entries that ended within [from, now):
+ * { matches, wins, kills, damage, rp }. Matches count only the ones the
+ * tracker saw; rp also includes changes from unseen matches.
+ */
+export const getApexHistoryStats = (matchLog = [], from, now = Date.now()) => {
+  const stats = { matches: 0, wins: 0, kills: 0, damage: 0, rp: 0 };
+  for (const m of matchLog) {
+    if (!(m.endedAt >= from && m.endedAt < now)) continue;
+    stats.rp += m.rpChange || 0;
+    if (isUnseen(m)) continue;
+    stats.matches++;
+    if (m.win === true) stats.wins++;
+    stats.kills += m.kills || 0;
+    stats.damage += m.damage || 0;
+  }
+  return stats;
 };

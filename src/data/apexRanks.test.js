@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { formatApexTier, formatApexRank, getRpChange } from "./apexRanks";
+import {
+  formatApexTier,
+  formatApexRank,
+  getRpChange,
+  getRankProgress,
+} from "./apexRanks";
 
 const rank = (name, div, score, extra = {}) => ({
   name,
@@ -51,5 +56,36 @@ describe("getRpChange", () => {
     expect(
       getRpChange(rank("Gold", 2, 6400), rank("Rookie", 4, 0, { season: "s2" })),
     ).toEqual(none);
+  });
+});
+
+describe("getRankProgress", () => {
+  it("measures the way to the next division", () => {
+    // A real player: 13 931 RP is Diamond III
+    expect(getRankProgress(rank("Diamond", 3, 13931))).toEqual({
+      next: "Diamond II",
+      left: 69,
+      fraction: 0.931,
+    });
+    expect(getRankProgress(rank("Rookie", 4, 0))).toMatchObject({
+      next: "Rookie III",
+      left: 250,
+      fraction: 0,
+    });
+  });
+
+  it("points Diamond I at Master", () => {
+    expect(getRankProgress(rank("Diamond", 1, 15500))).toMatchObject({
+      next: "Master",
+      left: 500,
+    });
+  });
+
+  it("stays silent when the table disagrees with the API", () => {
+    // A season with other floors: the API says Diamond II at 13 931
+    expect(getRankProgress(rank("Diamond", 2, 13931))).toBeNull();
+    expect(getRankProgress(rank("Master", 0, 17000))).toBeNull();
+    expect(getRankProgress(rank("Unranked", 0, 0))).toBeNull();
+    expect(getRankProgress(null)).toBeNull();
   });
 });
