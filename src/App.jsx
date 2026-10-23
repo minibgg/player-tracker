@@ -209,7 +209,9 @@ export default function App() {
     pollingInterval,
     isEnabled: isGlobalTracking,
     onTick: () => {
-      if (!isApiKeyRejected) refreshAllPlayers();
+      // Game-start messages name the champion, so the first League pass
+      // waits for Data Dragon instead of logging "Champion #N"
+      if (!isApiKeyRejected) initDataDragon().then(() => refreshAllPlayers());
       if (!isApexKeyRejected) apexPolling.refreshAllPlayers();
     },
   });

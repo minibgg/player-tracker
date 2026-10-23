@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 
 /**
- * One poll clock for every game: calls onTick each `pollingInterval`
- * seconds while enabled and returns the seconds left until the next call.
+ * One poll clock for every game: calls onTick as soon as it's enabled, then
+ * each `pollingInterval` seconds, and returns the seconds left until the
+ * next call.
  *
  * Works off a wall-clock deadline instead of counting ticks, so it stays
  * accurate when the browser throttles a background tab.
@@ -33,8 +34,10 @@ export const usePollTicker = ({ pollingInterval, isEnabled, onTick }) => {
   useEffect(() => {
     if (!isEnabled) return;
 
-    // Fresh deadline whenever the interval changes or tracking resumes
+    // Check right away whenever the interval changes or tracking resumes, so
+    // the board doesn't show stored data for a whole interval after opening
     nextCheckAtRef.current = Date.now() + pollingInterval * 1000;
+    onTickRef.current?.();
 
     const tick = () => {
       const left = Math.ceil((nextCheckAtRef.current - Date.now()) / 1000);

@@ -2,7 +2,7 @@
 
 let currentVersion = "14.24.1";
 let championKeyToData = {};
-let isInitialized = false;
+let initPromise = null;
 
 // Fallback lookup table for popular champions
 const FALLBACK_CHAMPIONS = {
@@ -60,8 +60,7 @@ const FALLBACK_CHAMPIONS = {
   799: { id: "Ambessa", name: "Ambessa" },
 };
 
-export const initDataDragon = async () => {
-  if (isInitialized) return currentVersion;
+const loadDataDragon = async () => {
   try {
     // 1. Fetch latest version
     const versionRes = await fetch(
@@ -94,7 +93,6 @@ export const initDataDragon = async () => {
             tags: c.tags,
           };
         });
-        isInitialized = true;
       }
     }
   } catch (e) {
@@ -105,6 +103,12 @@ export const initDataDragon = async () => {
   }
 
   return currentVersion;
+};
+
+// Loaded once per session; every caller waits on the same load
+export const initDataDragon = () => {
+  if (!initPromise) initPromise = loadDataDragon();
+  return initPromise;
 };
 
 export const getDDragonVersion = () => currentVersion;
