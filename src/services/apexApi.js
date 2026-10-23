@@ -157,11 +157,19 @@ export const legendKey = (name) =>
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]/gu, "");
 
-// "inMatch" / "inLobby" / "offline", with isInGame / isOnline as a fallback
+const PRESENCE_BY_STATE = {
+  inmatch: "IN_GAME",
+  inlobby: "IN_LOBBY",
+  offline: "OFFLINE",
+};
+
+// "inMatch" / "inLobby" / "offline", with isInGame / isOnline only as a
+// fallback: isInGame can stay 1 for hours after the player went offline
 export const getPresence = (realtime = {}) => {
   const state = String(realtime.currentState || "").toLowerCase();
-  if (state === "inmatch" || num(realtime.isInGame) === 1) return "IN_GAME";
-  if (state === "inlobby" || num(realtime.isOnline) === 1) return "IN_LOBBY";
+  if (PRESENCE_BY_STATE[state]) return PRESENCE_BY_STATE[state];
+  if (num(realtime.isInGame) === 1) return "IN_GAME";
+  if (num(realtime.isOnline) === 1) return "IN_LOBBY";
   return "OFFLINE";
 };
 

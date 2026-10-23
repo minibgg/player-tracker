@@ -114,6 +114,10 @@ describe("getPresence", () => {
     expect(getPresence({ currentState: "inLobby" })).toBe("IN_LOBBY");
     expect(getPresence({ currentState: "offline" })).toBe("OFFLINE");
     expect(getPresence({ isInGame: 1 })).toBe("IN_GAME");
+    // EA leaves isInGame set after the player quits
+    expect(
+      getPresence({ currentState: "offline", isOnline: 0, isInGame: 1 }),
+    ).toBe("OFFLINE");
     expect(getPresence({ isOnline: "1" })).toBe("IN_LOBBY");
     expect(getPresence()).toBe("OFFLINE");
   });

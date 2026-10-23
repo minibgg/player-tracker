@@ -146,8 +146,32 @@ describe("applyApexSnapshot", () => {
   it("marks a result unseen when the polls around it were far apart", () => {
     let r = step(added(), inMatch(T0 + MIN), T0 + 2 * MIN);
     r = step(r.player, snap({ xpPercent: 90 }), T0 + 2 * 60 * MIN);
-    expect(r.events).toEqual(["GAME_END"]);
+    expect(r.events).toEqual([]);
     expect(r.player.lastMatchResult.kind).toBe("unseen");
+  });
+
+  it("doesn't take a match the API kept open for hours for a real one", () => {
+    let r = step(added(), inMatch(null), T0 + MIN);
+    for (let t = T0 + 30 * MIN; t <= T0 + 4 * 60 * MIN; t += 30 * MIN) {
+      r = step(r.player, inMatch(null), t);
+    }
+    const paid = { name: "Gold", div: 2, score: 6390, season: "s1" };
+    r = step(r.player, snap({ presence: "OFFLINE", stateSince: null, rank: paid }), T0 + 4 * 60 * MIN + MIN);
+    expect(r.events).toEqual([]);
+    expect(r.player.status).toBe("OFFLINE");
+    expect(r.player.lastMatchResult).toMatchObject({ kind: "unseen", rpChange: -10 });
+  });
+
+  it("takes XP right after a match started for the previous match's", () => {
+    // RP of matches it never saw arrives first, their XP a poll later
+    let r = step(added(), snap(), T0 + MIN);
+    const rp = { name: "Gold", div: 2, score: 6700, season: "s1" };
+    r = step(r.player, inMatch(null, { rank: rp }), T0 + 2 * 60 * MIN);
+    expect(r.events).toEqual(["GAME_START"]);
+    r = step(r.player, inMatch(null, { rank: rp, xpPercent: 90 }), T0 + 2 * 60 * MIN + 30_000);
+    expect(r.events).toEqual([]);
+    expect(r.player.sessions).toHaveLength(1);
+    expect(r.player.matchLog).toHaveLength(1);
   });
 
   it("keeps a log of RP over time", () => {
@@ -182,6 +206,7 @@ describe("applyApexSnapshot", () => {
     expect(r.player.sessions[0].start).toBe(T0 + 40_000);
 
     // A trusted since that jumps means a new match, even without XP news
+    r = step(r.player, inMatch(T0 + 40_000), T0 + 14 * MIN);
     r = step(r.player, inMatch(T0 + 25 * MIN), T0 + 26 * MIN);
     expect(r.events).toEqual(["GAME_END", "GAME_START"]);
     expect(r.player.sessions).toHaveLength(2);

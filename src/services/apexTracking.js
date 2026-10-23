@@ -47,7 +47,12 @@ const baselineOf = (p) => ({
 // past can't be the request time; two polls agreeing on it prove it's real.
 const PAST_SINCE_MS = 30 * 1000;
 const SINCE_TOLERANCE_MS = 5 * 1000;
-const MAX_MATCH_MS = 2 * 60 * 60 * 1000;
+// No match lasts this long: a longer one means the API kept the player in
+// a match they had left
+const MAX_MATCH_MS = 60 * 60 * 1000;
+// Leaving a match, queueing and loading into the next takes longer than
+// this; XP moving sooner is the API catching up on the previous match
+const MIN_SWITCH_MS = 2 * 60 * 1000;
 
 const pastSinceOf = (snap, now) =>
   snap.stateSince &&
@@ -62,6 +67,7 @@ const newMatch = (snap, now) => {
     matchKey: start,
     // Read by useGameClock for the live stopwatch
     gameStartTime: start,
+    seenAt: now,
     since: snap.stateSince,
     sinceReliable: false,
     legend: snap.legend,
@@ -144,12 +150,16 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
   const xpMoved =
     p.xpPercent !== undefined &&
     (snap.level !== p.level || snap.xpPercent !== p.xpPercent);
+  const seenFor =
+    now - (currentGame?.seenAt ?? currentGame?.gameStartTime ?? 0);
   const sinceJumped =
     Boolean(currentGame?.sinceReliable && snap.stateSince) &&
     snap.stateSince > currentGame.since &&
     !isSameMatch(currentGame.since, snap.stateSince);
   const switchedGame =
-    wasInGame && isNowInGame && ((xpMoved && !pendingResult) || sinceJumped);
+    wasInGame &&
+    isNowInGame &&
+    ((xpMoved && !pendingResult && seenFor >= MIN_SWITCH_MS) || sinceJumped);
   const gameEnded = (wasInGame && !isNowInGame) || switchedGame;
 
   // Unseen matches are logged but never alert: they're old news
@@ -203,6 +213,11 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
     const leftAt = snap.stateSince;
     const endedAt =
       leftAt && leftAt > game.gameStartTime && leftAt <= now ? leftAt : now;
+    // Polls too far apart may have mixed later matches into this result;
+    // an overlong match ended unnoticed. Either way it's old news.
+    const lost =
+      (p.lastChecked && now - p.lastChecked > STALE_GAP_MS) ||
+      endedAt - game.gameStartTime > MAX_MATCH_MS;
     history = pushHistory(history, {
       timestamp: now,
       status: snap.presence,
@@ -213,10 +228,7 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
       legend: game.legend,
     });
     pendingResult = {
-      // Polls too far apart: later matches may be mixed into this result
-      ...(p.lastChecked && now - p.lastChecked > STALE_GAP_MS
-        ? { kind: "unseen" }
-        : {}),
+      ...(lost ? { kind: "unseen" } : {}),
       matchKey: game.matchKey,
       legend: game.legend,
       startedAt: game.gameStartTime,
@@ -226,7 +238,7 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
     };
     matchBaseline = null;
     currentGame = null;
-    events.push({ type: "GAME_END", player: p });
+    if (!lost) events.push({ type: "GAME_END", player: p });
   }
 
   // Before a new match starts, so the result is announced first
