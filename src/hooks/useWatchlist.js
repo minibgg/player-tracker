@@ -197,21 +197,26 @@ export const useWatchlist = ({ apiKey, proxyType, customProxy, addToast }) => {
     }
   };
 
+  // Returns the players it added, for the caller to check right away
   const importPlayers = (fileText) => {
     try {
       const imported = parseWatchlistBackup(fileText);
-      const { watchlist: merged, added, skipped } = mergeImportedPlayers(
-        watchlistRef.current,
-        imported,
-      );
+      const {
+        watchlist: merged,
+        newPlayers,
+        added,
+        skipped,
+      } = mergeImportedPlayers(watchlistRef.current, imported);
       setWatchlist(merged);
       addToast(
         added > 0 ? "success" : "info",
         `Добавлено игроков: ${added}${skipped > 0 ? `, уже были в списке: ${skipped}` : ""}.`,
         "Импорт списка",
       );
+      return newPlayers;
     } catch (err) {
       addToast("error", err.message, "Импорт не удался");
+      return [];
     }
   };
 

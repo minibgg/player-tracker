@@ -180,6 +180,7 @@ export default function App() {
 
   const {
     checkPlayerStatus,
+    checkPlayers,
     refreshAllPlayers,
     isRefreshingAll,
     checkingPlayerIds,
@@ -215,6 +216,34 @@ export default function App() {
       if (!isApexKeyRejected) apexPolling.refreshAllPlayers();
     },
   });
+
+  // Players imported or resumed between polls are checked right away rather
+  // than on the next poll, unless tracking is paused or the key was rejected
+  const checkLeagueNow = (players) => {
+    if (!isGlobalTracking || isApiKeyRejected || players.length === 0) return;
+    initDataDragon().then(() => checkPlayers(players));
+  };
+  const checkApexNow = (players) => {
+    if (!isGlobalTracking || isApexKeyRejected || players.length === 0) return;
+    apexPolling.checkPlayers(players);
+  };
+
+  // The toggle hasn't reached the list yet, so the check gets the player as
+  // resumed
+  const handleToggleTracking = (playerId) => {
+    const player = watchlistRef.current.find((p) => p.id === playerId);
+    toggleTracking(playerId);
+    if (player && !player.isTracking) {
+      checkLeagueNow([{ ...player, isTracking: true }]);
+    }
+  };
+  const handleApexToggleTracking = (playerId) => {
+    const player = apex.watchlistRef.current.find((p) => p.id === playerId);
+    apex.toggleTracking(playerId);
+    if (player && !player.isTracking) {
+      checkApexNow([{ ...player, isTracking: true }]);
+    }
+  };
 
   // Initialize Data Dragon
   useEffect(() => {
@@ -296,8 +325,8 @@ export default function App() {
 
   // One backup file carries both lists
   const handleImportWatchlist = (fileText) => {
-    importPlayers(fileText);
-    apex.importPlayers(fileText);
+    checkLeagueNow(importPlayers(fileText));
+    checkApexNow(apex.importPlayers(fileText));
   };
 
   // Filter and sort: PINNED PLAYERS ALWAYS FIRST!
@@ -446,7 +475,7 @@ export default function App() {
               onAddPlayer={apex.addPlayer}
               onCheckPlayer={(p) => apexPolling.checkPlayerStatus(p, true)}
               checkingPlayerIds={apexPolling.checkingPlayerIds}
-              onToggleTracking={apex.toggleTracking}
+              onToggleTracking={handleApexToggleTracking}
               onDeletePlayer={apex.deletePlayer}
               onTogglePin={apex.togglePin}
               onToggleMute={apex.toggleMute}
@@ -535,7 +564,7 @@ export default function App() {
                         <PlayerCard
                           player={player}
                           onCheckPlayer={(p) => checkPlayerStatus(p, true)}
-                          onToggleTracking={toggleTracking}
+                          onToggleTracking={handleToggleTracking}
                           onDeletePlayer={deletePlayer}
                           onViewMatch={(p) => setActiveMatchModalPlayer(p)}
                           onTogglePin={togglePin}

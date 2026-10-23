@@ -47,6 +47,9 @@ export const usePlayerPolling = ({
 }) => {
   const [isRefreshingAll, setIsRefreshingAll] = useState(false);
   const [checkingPlayerIds, setCheckingPlayerIds] = useState(new Set());
+  // Two checks of one player at once would both see the old state and
+  // announce the same change twice, so the later one is skipped
+  const inFlightRef = useRef(new Set());
 
   // Events go through a ref so new alert settings don't recreate the pollers
   const onEventRef = useRef(onEvent);
@@ -78,6 +81,8 @@ export const usePlayerPolling = ({
 
       const api = { apiKey, proxyType, customProxy };
       const emit = (event) => onEventRef.current?.(event);
+      if (inFlightRef.current.has(player.id)) return;
+      inFlightRef.current.add(player.id);
       setCheckingPlayerIds((prev) => new Set(prev).add(player.id));
 
       try {
@@ -393,6 +398,7 @@ export const usePlayerPolling = ({
           );
         }
       } finally {
+        inFlightRef.current.delete(player.id);
         setCheckingPlayerIds((prev) => {
           const next = new Set(prev);
           next.delete(player.id);
@@ -401,6 +407,22 @@ export const usePlayerPolling = ({
       }
     },
     [apiKey, proxyType, customProxy, addToast, watchlistRef, setWatchlist],
+  );
+
+  /**
+   * Check the given players one by one: every tracked player on a poll, or
+   * just the ones imported or resumed between polls
+   */
+  const checkPlayers = useCallback(
+    async (players) => {
+      for (const player of players) {
+        // Stop the whole pass when every remaining check would fail the same way
+        if ((await checkPlayerStatus(player, false)) === "STOP") break;
+        // Timers are throttled hard in background tabs, so skip the pause there
+        if (!document.hidden) await new Promise((r) => setTimeout(r, 150));
+      }
+    },
+    [checkPlayerStatus],
   );
 
   /**
@@ -413,21 +435,16 @@ export const usePlayerPolling = ({
     setIsRefreshingAll(true);
 
     try {
-      const activeList = watchlistRef.current.filter((p) => p.isTracking);
-      for (const player of activeList) {
-        // Stop the whole pass when every remaining check would fail the same way
-        if ((await checkPlayerStatus(player, false)) === "STOP") break;
-        // Timers are throttled hard in background tabs, so skip the pause there
-        if (!document.hidden) await new Promise((r) => setTimeout(r, 150));
-      }
+      await checkPlayers(watchlistRef.current.filter((p) => p.isTracking));
     } finally {
       isRefreshingRef.current = false;
       setIsRefreshingAll(false);
     }
-  }, [checkPlayerStatus, watchlistRef]);
+  }, [checkPlayers, watchlistRef]);
 
   return {
     checkPlayerStatus,
+    checkPlayers,
     refreshAllPlayers,
     isRefreshingAll,
     checkingPlayerIds,

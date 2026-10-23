@@ -76,13 +76,14 @@ describe("mergeImportedPlayers", () => {
       player("Faker", { region: "kr", tagLine: "KR1" }),
       player("Faker", { region: "kr", tagLine: "KR1" }),
     ];
-    const { watchlist, added, skipped } = mergeImportedPlayers(
+    const { watchlist, newPlayers, added, skipped } = mergeImportedPlayers(
       existing,
       imported,
     );
     expect(added).toBe(1);
     expect(skipped).toBe(2);
     expect(watchlist.map((p) => p.gameName)).toEqual(["Caps", "Faker"]);
+    expect(newPlayers).toEqual([watchlist[1]]);
   });
 });
 
@@ -149,5 +150,6 @@ describe("Apex players in the backup", () => {
       "Genburten",
       "Verhulst",
     ]);
+    expect(result.newPlayers.map((p) => p.name)).toEqual(["Verhulst"]);
   });
 });

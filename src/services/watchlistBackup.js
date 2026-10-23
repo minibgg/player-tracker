@@ -112,7 +112,7 @@ export const parseWatchlistBackup = (text) => {
 const playerKey = (p) =>
   `${p.region}::${p.gameName}#${p.tagLine}`.toLowerCase();
 
-// Appends imported players that aren't in the list yet
+// Appends imported players that aren't in the list yet (newPlayers)
 export const mergeImportedPlayers = (existing, imported) => {
   const seen = new Set(existing.map(playerKey));
   const added = [];
@@ -124,6 +124,7 @@ export const mergeImportedPlayers = (existing, imported) => {
   }
   return {
     watchlist: [...existing, ...added],
+    newPlayers: added,
     added: added.length,
     skipped: imported.length - added.length,
   };
@@ -201,6 +202,7 @@ export const mergeImportedApexPlayers = (existing, imported) => {
   }
   return {
     watchlist: [...existing, ...added],
+    newPlayers: added,
     added: added.length,
     skipped: imported.length - added.length,
   };

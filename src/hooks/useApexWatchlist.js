@@ -119,23 +119,28 @@ export const useApexWatchlist = ({ apiKey, addToast }) => {
     }
   };
 
-  // Quiet for backups without Apex players, so a League-only import shows one toast
+  // Quiet for backups without Apex players, so a League-only import shows one
+  // toast. Returns the players it added, for the caller to check right away
   const importPlayers = (fileText) => {
     try {
       const imported = parseApexBackup(fileText);
-      if (imported.length === 0) return;
-      const { watchlist: merged, added, skipped } = mergeImportedApexPlayers(
-        watchlistRef.current,
-        imported,
-      );
+      if (imported.length === 0) return [];
+      const {
+        watchlist: merged,
+        newPlayers,
+        added,
+        skipped,
+      } = mergeImportedApexPlayers(watchlistRef.current, imported);
       setWatchlist(merged);
       addToast(
         added > 0 ? "success" : "info",
         `Добавлено игроков Apex: ${added}${skipped > 0 ? `, уже были в списке: ${skipped}` : ""}.`,
         "Импорт Apex",
       );
+      return newPlayers;
     } catch {
       // The League import already reported a broken file
+      return [];
     }
   };
 
