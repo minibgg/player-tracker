@@ -20,6 +20,17 @@ describe("parseRiotId", () => {
     expect(() => parseRiotId("")).toThrow();
     expect(() => parseRiotId("#EUW")).toThrow(/имени/);
   });
+
+  it("trims whitespace around parts and uses custom default tag when missing #", () => {
+    expect(parseRiotId("  Faker # KR1 ")).toEqual({
+      gameName: "Faker",
+      tagLine: "KR1",
+    });
+    expect(parseRiotId("Faker", "NA1")).toEqual({
+      gameName: "Faker",
+      tagLine: "NA1",
+    });
+  });
 });
 
 describe("buildProxiedUrl", () => {
