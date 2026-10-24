@@ -46,6 +46,7 @@ export const serializeWatchlist = (
         rank: p.rank || null,
         lastMatchResult: p.lastMatchResult || null,
         matchLog: p.matchLog || [],
+        liveTrackers: p.liveTrackers,
         rpLog: p.rpLog || [],
         statusHistory: p.statusHistory || [],
         sessions: p.sessions || [],
@@ -154,6 +155,10 @@ const toApexPlayer = (p) => ({
   matchLog: Array.isArray(p.matchLog)
     ? p.matchLog.filter(isObject).slice(0, 100)
     : [],
+  // Missing from older backups, whose match log clearUnprovenZeros cleans up
+  liveTrackers: Array.isArray(p.liveTrackers)
+    ? p.liveTrackers.filter(isNonEmptyString)
+    : undefined,
   rpLog: Array.isArray(p.rpLog)
     ? p.rpLog
         .filter((e) => isObject(e) && Number.isFinite(e.at) && Number.isFinite(e.score))

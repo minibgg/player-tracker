@@ -7,7 +7,7 @@ import {
 import { getApexPlatform } from "../data/apexPlatforms";
 import { fetchApexPlayer, parseApexPlayerInput } from "../services/apexApi";
 import { rememberLegendAssets } from "../services/apexAssets";
-import { createApexPlayer } from "../services/apexTracking";
+import { createApexPlayer, clearUnprovenZeros } from "../services/apexTracking";
 import {
   createPlayerId,
   parseApexBackup,
@@ -15,6 +15,9 @@ import {
 } from "../services/watchlistBackup";
 
 const getName = (p) => p.name;
+
+// Saves from older versions are cleaned up on the way in
+const loadWatchlist = () => getStoredApexWatchlist().map(clearUnprovenZeros);
 
 // The service's site resolves names its API can't, and links to the UID
 const profileUrl = (platform, name) =>
@@ -26,7 +29,7 @@ const profileUrl = (platform, name) =>
  */
 export const useApexWatchlist = ({ apiKey, addToast }) => {
   const list = usePlayerList({
-    load: getStoredApexWatchlist,
+    load: loadWatchlist,
     save: setStoredApexWatchlist,
     addToast,
     getName,
@@ -123,7 +126,7 @@ export const useApexWatchlist = ({ apiKey, addToast }) => {
   // toast. Returns the players it added, for the caller to check right away
   const importPlayers = (fileText) => {
     try {
-      const imported = parseApexBackup(fileText);
+      const imported = parseApexBackup(fileText).map(clearUnprovenZeros);
       if (imported.length === 0) return [];
       const {
         watchlist: merged,

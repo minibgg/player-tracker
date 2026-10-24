@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   createApexPlayer,
   applyApexSnapshot,
+  clearUnprovenZeros,
   RESULT_WAIT_MS,
 } from "./apexTracking";
 
@@ -234,5 +235,61 @@ describe("applyApexSnapshot", () => {
   it("keeps the old name when the API sends none", () => {
     const r = step(added(), snap({ name: "" }), T0 + MIN);
     expect(r.player.name).toBe("Caustic_Fan");
+  });
+
+  it("calls a match lost only once the wins tracker has been seen counting", () => {
+    const wins = (value, overrides = {}) => ({
+      legends: {
+        wraith: { name: "Wraith", trackers: [{ key: "wins", name: "BR Wins", value }] },
+      },
+      ...overrides,
+    });
+    // XP moved and the tracker didn't: it may be one that never counts
+    let r = step(added(snap(wins(3))), inMatch(T0 + MIN, wins(3)), T0 + 2 * MIN);
+    r = step(r.player, snap(wins(3, { xpPercent: 50 })), T0 + 12 * MIN);
+    expect(r.player.lastMatchResult.win).toBeNull();
+
+    r = step(r.player, inMatch(T0 + 13 * MIN, wins(3, { xpPercent: 50 })), T0 + 14 * MIN);
+    r = step(r.player, snap(wins(4, { xpPercent: 60 })), T0 + 24 * MIN);
+    expect(r.player.lastMatchResult.win).toBe(true);
+    expect(r.player.liveTrackers).toEqual(["wraith:wins"]);
+
+    // Now a tracker standing still is a real loss
+    r = step(r.player, inMatch(T0 + 25 * MIN, wins(4, { xpPercent: 60 })), T0 + 26 * MIN);
+    r = step(r.player, snap(wins(4, { xpPercent: 70 })), T0 + 36 * MIN);
+    expect(r.player.lastMatchResult.win).toBe(false);
+  });
+});
+
+describe("clearUnprovenZeros", () => {
+  it("forgets the zeros older saves read from trackers never seen counting", () => {
+    const old = {
+      ...added(),
+      liveTrackers: undefined,
+      lastMatchResult: { win: false, kills: 0, damage: 1200 },
+      matchLog: [
+        { win: false, kills: 0, damage: 1200 },
+        { win: true, kills: 3, damage: 0 },
+        { win: null, kills: null, damage: null },
+      ],
+      sessions: [
+        { matchId: 1, start: T0, win: false },
+        { matchId: 2, start: T0, win: true },
+      ],
+    };
+    const p = clearUnprovenZeros(old);
+    expect(p.liveTrackers).toEqual([]);
+    expect(p.lastMatchResult).toEqual({ win: null, kills: null, damage: 1200 });
+    expect(p.matchLog).toEqual([
+      { win: null, kills: null, damage: 1200 },
+      { win: true, kills: 3, damage: null },
+      { win: null, kills: null, damage: null },
+    ]);
+    expect(p.sessions.map((s) => s.win)).toEqual([null, true]);
+  });
+
+  it("leaves newer saves alone", () => {
+    const p = added();
+    expect(clearUnprovenZeros(p)).toBe(p);
   });
 });

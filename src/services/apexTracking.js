@@ -3,6 +3,7 @@
 import { startSession, updateSession } from "./activity";
 import {
   getMatchResult,
+  updateLiveTrackers,
   isSameMatch,
   isUnseen,
   formatApexResult,
@@ -118,12 +119,39 @@ export const createApexPlayer = (
     pendingResult: null,
     lastMatchResult: null,
     matchLog: [],
+    liveTrackers: [],
     rpLog: pushRp([], snap.rank, now),
     lastChecked: now,
     sessions: currentGame ? startMatchSession([], currentGame, now) : [],
     statusHistory: [
       { timestamp: now, status: snap.presence, message: ADDED_MESSAGES[snap.presence] },
     ],
+  };
+};
+
+/**
+ * Players saved before liveTrackers existed took every banner tracker that
+ * didn't move for "no win, 0 kills", past-season ones included. Nothing
+ * proves those zeros, so they become unknown.
+ */
+export const clearUnprovenZeros = (p) => {
+  if (p.liveTrackers !== undefined) return p;
+  const clear = (r) =>
+    r && {
+      ...r,
+      win: r.win === false ? null : r.win,
+      kills: r.kills === 0 ? null : r.kills,
+      damage: r.damage === 0 ? null : r.damage,
+    };
+  return {
+    ...p,
+    liveTrackers: [],
+    lastMatchResult: clear(p.lastMatchResult || null),
+    matchLog: (p.matchLog || []).map(clear),
+    // Apex sessions only ever got their win from a result
+    sessions: (p.sessions || []).map((s) =>
+      s.win === false ? { ...s, win: null } : s,
+    ),
   };
 };
 
@@ -141,6 +169,8 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
   let matchLog = p.matchLog || [];
   let matchBaseline = p.matchBaseline || null;
   let currentGame = p.currentGame || null;
+  // Before any result is measured, so a tracker moving now already counts
+  const liveTrackers = updateLiveTrackers(p.liveTrackers, p.legends, snap.legends);
 
   const wasInGame = p.status === "IN_GAME";
   const isNowInGame = snap.presence === "IN_GAME";
@@ -183,7 +213,7 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
   // A result still waiting when the next match ends: measure it against the
   // last poll, before this match's numbers got mixed in
   if (pendingResult && gameEnded) {
-    finishPending(getMatchResult(pendingResult, baselineOf(p)));
+    finishPending(getMatchResult(pendingResult, baselineOf(p), liveTrackers));
   }
 
   if (p.status === "OFFLINE" && snap.presence === "IN_LOBBY") {
@@ -243,7 +273,7 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
 
   // Before a new match starts, so the result is announced first
   if (pendingResult) {
-    const result = getMatchResult(pendingResult, snap);
+    const result = getMatchResult(pendingResult, snap, liveTrackers);
     if (result.counted || now - pendingResult.endedAt > RESULT_WAIT_MS) {
       finishPending(result);
     }
@@ -268,6 +298,7 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
         baseline: baselineOf(p),
       },
       snap,
+      liveTrackers,
     );
     if (result.counted) {
       finishPending(result);
@@ -321,6 +352,7 @@ export const applyApexSnapshot = (p, snap, now = Date.now()) => {
       pendingResult,
       lastMatchResult,
       matchLog,
+      liveTrackers,
       rpLog: pushRp(p.rpLog, snap.rank, now),
       statusHistory: history,
       sessions,

@@ -5,6 +5,7 @@ import {
   formatApexResult,
   isSameMatch,
   getApexHistoryStats,
+  updateLiveTrackers,
 } from "./apexMatch";
 
 const gold = (score, div = 2) => ({ name: "Gold", div, score, season: "s1" });
@@ -60,14 +61,27 @@ describe("getMatchResult", () => {
     expect(result.kills).toBeNull();
   });
 
-  it("reports zero for trackers that did not move once counted", () => {
+  it("reports zero for counting trackers that did not move", () => {
     const after = { ...before, xpPercent: 45 };
-    expect(getMatchResult(pending(before), after)).toMatchObject({
+    const live = ["wraith:kills", "wraith:damage", "wraith:wins"];
+    expect(getMatchResult(pending(before), after, live)).toMatchObject({
       counted: true,
       win: false,
       kills: 0,
       damage: 0,
       rpChange: null,
+    });
+  });
+
+  it("leaves trackers never seen counting unknown", () => {
+    // Past-season and event trackers stay put even on a win
+    const after = { ...before, xpPercent: 45, rank: gold(6696) };
+    expect(getMatchResult(pending(before), after)).toMatchObject({
+      counted: true,
+      win: null,
+      kills: null,
+      damage: null,
+      rpChange: 296,
     });
   });
 
@@ -91,6 +105,20 @@ describe("getMatchResult", () => {
     expect(getMatchResult(pending(before), after).tierChange).toBe(
       "повышение: Gold I",
     );
+  });
+});
+
+describe("updateLiveTrackers", () => {
+  it("adds the trackers that grew, once", () => {
+    const live = updateLiveTrackers([], wraith(50, 9000, 3), wraith(52, 9000, 3));
+    expect(live).toEqual(["wraith:kills"]);
+    const more = updateLiveTrackers(live, wraith(52, 9000, 3), wraith(55, 9100, 3));
+    expect(more).toEqual(["wraith:kills", "wraith:damage"]);
+    expect(updateLiveTrackers(more, wraith(55, 9100, 3), wraith(55, 9100, 3))).toBe(more);
+  });
+
+  it("needs a value to compare with", () => {
+    expect(updateLiveTrackers(undefined, undefined, wraith(1, 1, 1))).toEqual([]);
   });
 });
 

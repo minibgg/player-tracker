@@ -2,7 +2,8 @@
 // keys, so the result is the difference between two snapshots of the player:
 // one taken before the match was counted, one after. Kills, damage and wins
 // come from the legend's banner trackers, so only the trackers the player
-// shows on the banner can be told.
+// shows on the banner can be told, and only those that still count matches:
+// trackers of past seasons and events stay put whatever happens.
 import { legendKey } from "./apexApi";
 import { getRpChange, formatRpChange } from "../data/apexRanks";
 
@@ -25,9 +26,6 @@ export const getTrackerKind = (tracker) => {
   return byName ? byName[1] : null;
 };
 
-const hasKind = (trackers, kind) =>
-  trackers.some((t) => getTrackerKind(t) === kind);
-
 // Positive change of each tracker present in both lists
 const getTrackerChanges = (before = [], after = []) =>
   after
@@ -38,15 +36,31 @@ const getTrackerChanges = (before = [], after = []) =>
     .filter((t) => t && t.delta > 0);
 
 /**
+ * Adds the trackers that grew between two snapshots' legends to `live`,
+ * as "legendKey:trackerKey". A tracker standing still only means "none"
+ * once it has been seen counting.
+ */
+export const updateLiveTrackers = (live = [], before = {}, after = {}) => {
+  const grown = Object.entries(after).flatMap(([key, legend]) =>
+    getTrackerChanges(before[key]?.trackers, legend.trackers).map(
+      (t) => `${key}:${t.key}`,
+    ),
+  );
+  const added = [...new Set(grown)].filter((id) => !live.includes(id));
+  return added.length > 0 ? [...live, ...added] : live;
+};
+
+/**
  * pending:  { matchKey, legend, startedAt, endedAt, baseline, kind? }
  * baseline: { rank, level, xpPercent, legends } from before the match counted
  * snapshot: the latest parseBridgeResponse() result
+ * liveTrackers: updateLiveTrackers() ids of trackers seen counting
  *
  * counted is false while the API still shows pre-match numbers (no XP,
  * tracker or RP change yet). kind "unseen" marks changes from matches the
  * tracker didn't see (it was closed, or a match fit between two polls).
  */
-export const getMatchResult = (pending, snapshot) => {
+export const getMatchResult = (pending, snapshot, liveTrackers = []) => {
   const { baseline = {} } = pending;
   const key = legendKey(pending.legend);
   const legendBefore = baseline.legends?.[key]?.trackers || [];
@@ -65,9 +79,14 @@ export const getMatchResult = (pending, snapshot) => {
       .map((t) => t.delta);
     return deltas.length > 0 ? Math.max(...deltas) : null;
   };
-  // A tracker that didn't move still says something once the match counted
+  // A tracker that didn't move says "none" once the match counted, but only
+  // if it is known to count: a past season's wins never move, even on a win
+  const isLiveKind = (kind) =>
+    legendAfter.some(
+      (t) => getTrackerKind(t) === kind && liveTrackers.includes(`${key}:${t.key}`),
+    );
   const countedKind = (kind) =>
-    byKind(kind) ?? (counted && hasKind(legendAfter, kind) ? 0 : null);
+    byKind(kind) ?? (counted && isLiveKind(kind) ? 0 : null);
   const wins = countedKind("wins");
 
   return {
@@ -78,7 +97,7 @@ export const getMatchResult = (pending, snapshot) => {
     endedAt: pending.endedAt,
     duration: Math.max(0, Math.round((pending.endedAt - pending.startedAt) / 1000)),
     counted,
-    // Only known when the banner shows a wins tracker
+    // Only known when the banner shows a wins tracker that counts
     win: wins === null ? null : wins > 0,
     kills: countedKind("kills"),
     damage: countedKind("damage"),
